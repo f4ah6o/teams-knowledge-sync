@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/obr-grp/teams-knowledge-sync/internal/auth"
@@ -117,6 +119,12 @@ func mailCmd(ctx context.Context, s mailservice.Service, db *store.Store, a *aut
 		}
 	case "status":
 		statusCmd(ctx, db, args[1:])
+	case "daemon":
+		daemonCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		if err := s.Daemon(daemonCtx); err != nil && !errors.Is(err, context.Canceled) {
+			must(err)
+		}
 	default:
 		usage()
 	}

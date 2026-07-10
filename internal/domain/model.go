@@ -62,7 +62,7 @@ type MailMessage struct {
 	ID, InternetMessageID, ConversationID, ConversationIndex, FolderID string
 	Subject, BodyHTML, BodyText, BodyPreview, BodyContentType          string
 	SenderAddress, SenderName, FromAddress, FromName                   string
-	ReceivedAt, SentAt, CreatedAt, ModifiedAt                          *time.Time
+	ReceivedAt, SentAt, CreatedAt, ModifiedAt, DeletedAt               *time.Time
 	Importance, FlagStatus, WebURL, ETag                               string
 	Read, Draft, HasAttachments                                        bool
 	RawJSON                                                            []byte
@@ -80,4 +80,9 @@ type MailSearchFilter struct {
 type MailSearchResult struct {
 	MailMessage
 	Snippet string
+}
+type MailSyncState struct {
+	FolderID, NextLink, DeltaLink, LastError string
+	LastAttemptAt, LastSuccessAt             *time.Time
+	ConsecutiveFailures                      int
 }

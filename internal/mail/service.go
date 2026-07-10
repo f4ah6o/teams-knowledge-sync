@@ -3,6 +3,7 @@ package mail
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -60,15 +61,16 @@ func (s Service) Sync(ctx context.Context, onlyFolder string) error {
 		return err
 	}
 	folders, err := s.configuredFolders(ctx, onlyFolder)
+	var failures []error
 	if err != nil {
-		return err
+		failures = append(failures, err)
 	}
 	for _, folder := range folders {
 		if err := s.syncFolder(ctx, folder); err != nil {
-			return fmt.Errorf("folder %s: %w", folder.DisplayName, err)
+			failures = append(failures, fmt.Errorf("folder %s: %w", folder.DisplayName, err))
 		}
 	}
-	return nil
+	return errors.Join(failures...)
 }
 
 func (s Service) configuredFolders(ctx context.Context, only string) ([]domain.MailFolder, error) {
@@ -77,6 +79,7 @@ func (s Service) configuredFolders(ctx context.Context, only string) ([]domain.M
 		ids = []string{only}
 	}
 	var out []domain.MailFolder
+	var failures []error
 	seen := map[string]bool{}
 	for _, id := range ids {
 		if s.excluded(id) {
@@ -84,7 +87,8 @@ func (s Service) configuredFolders(ctx context.Context, only string) ([]domain.M
 		}
 		var raw json.RawMessage
 		if err := s.Graph.Do(ctx, http.MethodGet, "me/mailFolders/"+graph.Escape(id), nil, &raw); err != nil {
-			return nil, err
+			failures = append(failures, fmt.Errorf("resolve folder %s: %w", id, err))
+			continue
 		}
 		folder, err := parseFolder(raw)
 		if err != nil {
@@ -100,28 +104,123 @@ func (s Service) configuredFolders(ctx context.Context, only string) ([]domain.M
 		}
 		out = append(out, folder)
 	}
-	return out, nil
+	return out, errors.Join(failures...)
 }
 
 func (s Service) syncFolder(ctx context.Context, folder domain.MailFolder) error {
+	return s.syncFolderRound(ctx, folder, true)
+}
+
+type deltaPage struct {
+	Value     []json.RawMessage `json:"value"`
+	NextLink  string            `json:"@odata.nextLink"`
+	DeltaLink string            `json:"@odata.deltaLink"`
+}
+
+func (s Service) syncFolderRound(ctx context.Context, folder domain.MailFolder, allowReset bool) error {
 	now := time.Now
 	if s.Now != nil {
 		now = s.Now
 	}
-	since := now().UTC().Add(-time.Duration(s.Config.Sync.MailInitialLookbackDays) * 24 * time.Hour)
+	started := now().UTC()
+	since := started.Add(-time.Duration(s.Config.Sync.MailInitialLookbackDays) * 24 * time.Hour)
 	selectFields := "id,internetMessageId,conversationId,conversationIndex,subject,body,bodyPreview,sender,from,toRecipients,ccRecipients,bccRecipients,replyTo,receivedDateTime,sentDateTime,createdDateTime,lastModifiedDateTime,isRead,isDraft,importance,flag,categories,hasAttachments,webLink,internetMessageHeaders"
-	path := "me/mailFolders/" + graph.Escape(folder.ID) + "/messages?$top=50&$orderby=receivedDateTime%20desc&$filter=" + url.QueryEscape("receivedDateTime ge "+since.Format(time.RFC3339)) + "&$select=" + selectFields + "&$expand=attachments($select=id,name,contentType,size,isInline,contentId)"
-	return s.Graph.Page(ctx, path, func(raw json.RawMessage) error {
-		message, err := parseMessage(raw, folder.ID)
-		if err != nil {
-			return err
+	state, err := s.Store.MailSyncState(ctx, folder.ID)
+	if err != nil {
+		return err
+	}
+	path := state.NextLink
+	if path == "" {
+		path = state.DeltaLink
+	}
+	if path == "" {
+		path = "me/mailFolders/" + graph.Escape(folder.ID) + "/messages/delta?$top=50&$orderby=receivedDateTime%20desc&$filter=" + url.QueryEscape("receivedDateTime ge "+since.Format(time.RFC3339)) + "&$select=" + selectFields + "&$expand=attachments($select=id,name,contentType,size,isInline,contentId)"
+	}
+	for path != "" {
+		var page deltaPage
+		if err = s.Graph.Do(ctx, http.MethodGet, path, nil, &page); err != nil {
+			if allowReset && invalidDeltaToken(err) {
+				if resetErr := s.Store.ResetMailSyncToken(ctx, folder.ID); resetErr != nil {
+					return errors.Join(err, resetErr)
+				}
+				return s.syncFolderRound(ctx, folder, false)
+			}
+			return s.recordFolderFailure(ctx, folder.ID, started, err)
 		}
-		message.Matches = Classify(message, s.Config.Mail.Addresses, s.Config.Mail.ReceivedEnabled(), s.Config.Mail.SentEnabled())
-		if len(message.Matches) == 0 {
-			return nil
+		for _, raw := range page.Value {
+			var marker struct {
+				ID      string          `json:"id"`
+				Removed json.RawMessage `json:"@removed"`
+			}
+			if err = json.Unmarshal(raw, &marker); err != nil {
+				return s.recordFolderFailure(ctx, folder.ID, started, err)
+			}
+			if len(marker.Removed) > 0 {
+				err = s.Store.TombstoneMailMessage(ctx, folder.ID, marker.ID, started)
+			} else {
+				var message domain.MailMessage
+				message, err = parseMessage(raw, folder.ID)
+				if err == nil {
+					message.Matches = Classify(message, s.Config.Mail.Addresses, s.Config.Mail.ReceivedEnabled(), s.Config.Mail.SentEnabled())
+					if len(message.Matches) == 0 {
+						err = s.Store.TombstoneMailMessage(ctx, folder.ID, message.ID, started)
+					} else {
+						err = s.Store.UpsertMailMessage(ctx, message)
+					}
+				}
+			}
+			if err != nil {
+				return s.recordFolderFailure(ctx, folder.ID, started, err)
+			}
 		}
-		return s.Store.UpsertMailMessage(ctx, message)
-	})
+		if page.NextLink != "" {
+			if err = s.Store.RecordMailSyncProgress(ctx, folder.ID, page.NextLink, started); err != nil {
+				return s.recordFolderFailure(ctx, folder.ID, started, err)
+			}
+			path = page.NextLink
+			continue
+		}
+		if page.DeltaLink == "" {
+			err = fmt.Errorf("delta response missing nextLink and deltaLink")
+			return s.recordFolderFailure(ctx, folder.ID, started, err)
+		}
+		if err = s.Store.RecordMailSyncSuccess(ctx, folder.ID, page.DeltaLink, started); err != nil {
+			return s.recordFolderFailure(ctx, folder.ID, started, err)
+		}
+		return nil
+	}
+	return nil
+}
+
+func (s Service) recordFolderFailure(ctx context.Context, folderID string, at time.Time, syncErr error) error {
+	if err := s.Store.RecordMailSyncFailure(ctx, folderID, at, syncErr); err != nil {
+		return errors.Join(syncErr, err)
+	}
+	return syncErr
+}
+
+func invalidDeltaToken(err error) bool {
+	v := strings.ToLower(err.Error())
+	return strings.Contains(v, "syncstatenotfound") || strings.Contains(v, "invaliddeltatoken") || strings.Contains(v, "410 gone")
+}
+
+func (s Service) Daemon(ctx context.Context) error {
+	interval := s.Config.Sync.Interval
+	if interval <= 0 {
+		interval = 5 * time.Minute
+	}
+	for {
+		_ = s.Sync(ctx, "")
+		timer := time.NewTimer(interval)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
 }
 
 func (s Service) excluded(id string) bool { return containsFold(s.Config.Mail.Folders.Exclude, id) }

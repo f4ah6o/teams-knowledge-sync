@@ -8,6 +8,7 @@
 
 ### Changed
 
+- Outlook Mail同期がフォルダー単位のdeltaLinkを利用し、追加・更新・削除・移動の反映と定期daemon実行に対応した。(`issues/done/20260710-add-mail-delta-sync.md`)
 - Teamsのチャネル・チャット同期が、コンテナ単位の最終成功時刻と24時間のオーバーラップを利用するようになった。(`issues/done/20260710-add-teams-overlap-sync.md`)
 
 ### Fixed

@@ -32,7 +32,14 @@ func (c *Client) Do(ctx context.Context, method, path string, body any, out any)
 		if e != nil {
 			return e
 		}
-		req, e := http.NewRequestWithContext(ctx, method, "https://graph.microsoft.com/v1.0/"+strings.TrimPrefix(path, "/"), strings.NewReader(string(raw)))
+		target := "https://graph.microsoft.com/v1.0/" + strings.TrimPrefix(path, "/")
+		if strings.HasPrefix(path, "https://graph.microsoft.com/") {
+			target = path
+		}
+		if strings.HasPrefix(path, "https://") && !strings.HasPrefix(path, "https://graph.microsoft.com/") {
+			return fmt.Errorf("unsupported Graph URL host")
+		}
+		req, e := http.NewRequestWithContext(ctx, method, target, strings.NewReader(string(raw)))
 		if e != nil {
 			return e
 		}
