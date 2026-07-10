@@ -42,3 +42,42 @@ type SearchResult struct {
 	ContainerName, TeamName, Snippet string
 	Score                            float64
 }
+
+type MailAddress struct{ Address, Name string }
+type MailFolder struct {
+	ID, ParentID, DisplayName, WellKnownName string
+	ChildCount, TotalCount, UnreadCount      int
+	Hidden, Enabled                          bool
+}
+type MailRecipient struct{ Type, Address, Name, NormalizedAddress string }
+type MailHeader struct{ Name, Value string }
+type MailAttachment struct {
+	ID, Name, ContentType, ContentID, Type string
+	Size                                   int
+	Inline                                 bool
+	RawJSON                                []byte
+}
+type MailMatch struct{ Address, MatchedBy, MatchedValue string }
+type MailMessage struct {
+	ID, InternetMessageID, ConversationID, ConversationIndex, FolderID string
+	Subject, BodyHTML, BodyText, BodyPreview, BodyContentType          string
+	SenderAddress, SenderName, FromAddress, FromName                   string
+	ReceivedAt, SentAt, CreatedAt, ModifiedAt                          *time.Time
+	Importance, FlagStatus, WebURL, ETag                               string
+	Read, Draft, HasAttachments                                        bool
+	RawJSON                                                            []byte
+	Recipients                                                         []MailRecipient
+	Headers                                                            []MailHeader
+	Attachments                                                        []MailAttachment
+	Categories                                                         []string
+	Matches                                                            []MailMatch
+}
+type MailSearchFilter struct {
+	Query, Address, Sender, FolderID string
+	From, To                         *time.Time
+	Limit                            int
+}
+type MailSearchResult struct {
+	MailMessage
+	Snippet string
+}

@@ -1,0 +1,22 @@
+database:
+  path: ./data/outlook-knowledge.db
+entra:
+  tenant_id: ${OUTLOOK_TENANT_ID}
+  client_id: ${OUTLOOK_CLIENT_ID}
+mail:
+  include_received: true
+  include_sent: true
+  addresses:
+    - address: user@example.com
+      name: 個人
+      enabled: true
+      match:
+        headers: [to, cc, delivered-to, x-original-to, envelope-to, x-envelope-to]
+        subject_prefixes: []
+  folders:
+    include: [inbox, sentitems, archive]
+    exclude: [deleteditems, junkemail, drafts, outbox]
+sync:
+  mail_initial_lookback_days: 365
+  request_timeout: 30s
+  max_retries: 5

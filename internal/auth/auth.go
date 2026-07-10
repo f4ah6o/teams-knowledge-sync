@@ -26,18 +26,41 @@ type Token struct {
 	AccessToken  string    `json:"access_token"`
 	RefreshToken string    `json:"refresh_token"`
 	ExpiresAt    time.Time `json:"expires_at"`
+	Scopes       []string  `json:"scopes,omitempty"`
 }
 type Manager struct {
 	tenant, client, cachePath string
 	http                      *http.Client
+	scopes                    []string
 }
 
 func New(tenant, client string) *Manager {
+	return NewWithScopes(tenant, client, "User.Read", "Team.ReadBasic.All", "Channel.ReadBasic.All", "ChannelMessage.Read.All", "Chat.Read")
+}
+
+func NewWithScopes(tenant, client string, scopes ...string) *Manager {
 	base, err := os.UserConfigDir()
 	if err != nil {
 		base = "."
 	}
-	return &Manager{tenant: tenant, client: client, cachePath: filepath.Join(base, "teams-knowledge-sync", "token.cache"), http: &http.Client{Timeout: 30 * time.Second}}
+	return &Manager{tenant: tenant, client: client, cachePath: filepath.Join(base, "teams-knowledge-sync", "token.cache"), http: &http.Client{Timeout: 30 * time.Second}, scopes: scopes}
+}
+
+func (m *Manager) scope() string {
+	return strings.Join(append([]string{"offline_access"}, m.scopes...), " ")
+}
+
+func (m *Manager) hasScopes(t Token) bool {
+	granted := map[string]bool{}
+	for _, scope := range t.Scopes {
+		granted[strings.ToLower(scope)] = true
+	}
+	for _, scope := range m.scopes {
+		if !granted[strings.ToLower(scope)] {
+			return false
+		}
+	}
+	return true
 }
 func (m *Manager) tokenURL() string {
 	return "https://login.microsoftonline.com/" + url.PathEscape(m.tenant) + "/oauth2/v2.0/token"
@@ -135,13 +158,13 @@ func (m *Manager) AccessToken(ctx context.Context) (string, error) {
 	if e != nil {
 		return "", e
 	}
-	if time.Until(t.ExpiresAt) > 2*time.Minute {
+	if time.Until(t.ExpiresAt) > 2*time.Minute && m.hasScopes(t) {
 		return t.AccessToken, nil
 	}
 	if t.RefreshToken == "" {
 		return "", fmt.Errorf("reauthentication required")
 	}
-	n, e := m.exchange(ctx, url.Values{"client_id": {m.client}, "grant_type": {"refresh_token"}, "refresh_token": {t.RefreshToken}, "scope": {"offline_access User.Read Team.ReadBasic.All Channel.ReadBasic.All ChannelMessage.Read.All Chat.Read"}})
+	n, e := m.exchange(ctx, url.Values{"client_id": {m.client}, "grant_type": {"refresh_token"}, "refresh_token": {t.RefreshToken}, "scope": {m.scope()}})
 	if e != nil {
 		return "", e
 	}
@@ -154,7 +177,7 @@ func (m *Manager) AccessToken(ctx context.Context) (string, error) {
 	return n.AccessToken, nil
 }
 func (m *Manager) Login(ctx context.Context, notify func(string)) error {
-	form := url.Values{"client_id": {m.client}, "scope": {"offline_access User.Read Team.ReadBasic.All Channel.ReadBasic.All ChannelMessage.Read.All Chat.Read"}}
+	form := url.Values{"client_id": {m.client}, "scope": {m.scope()}}
 	req, e := http.NewRequestWithContext(ctx, http.MethodPost, "https://login.microsoftonline.com/"+url.PathEscape(m.tenant)+"/oauth2/v2.0/devicecode", strings.NewReader(form.Encode()))
 	if e != nil {
 		return e
@@ -221,12 +244,13 @@ func (m *Manager) exchange(ctx context.Context, form url.Values) (Token, error) 
 		ExpiresIn    int    `json:"expires_in"`
 		Error        string `json:"error"`
 		Description  string `json:"error_description"`
+		Scope        string `json:"scope"`
 	}
 	_ = json.Unmarshal(b, &v)
 	if res.StatusCode/100 != 2 {
 		return Token{}, fmt.Errorf("token request %s: %s %s", res.Status, v.Error, v.Description)
 	}
-	return Token{AccessToken: v.AccessToken, RefreshToken: v.RefreshToken, ExpiresAt: time.Now().Add(time.Duration(v.ExpiresIn) * time.Second)}, nil
+	return Token{AccessToken: v.AccessToken, RefreshToken: v.RefreshToken, ExpiresAt: time.Now().Add(time.Duration(v.ExpiresIn) * time.Second), Scopes: strings.Fields(v.Scope)}, nil
 }
 
 var _ = bytes.MinRead

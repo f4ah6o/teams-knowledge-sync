@@ -4,4 +4,5 @@ data/
 *.db-wal
 /teams-knowledge
 /teams
+/outlook-knowledge
 config.yaml

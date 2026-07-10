@@ -19,11 +19,12 @@ type Config struct {
 		ClientID string `yaml:"client_id"`
 	} `yaml:"entra"`
 	Sync struct {
-		InitialLookbackDays int           `yaml:"initial_lookback_days"`
-		OverlapDuration     time.Duration `yaml:"overlap_duration"`
-		FullResyncInterval  time.Duration `yaml:"full_resync_interval"`
-		RequestTimeout      time.Duration `yaml:"request_timeout"`
-		MaxRetries          int           `yaml:"max_retries"`
+		InitialLookbackDays     int           `yaml:"initial_lookback_days"`
+		MailInitialLookbackDays int           `yaml:"mail_initial_lookback_days"`
+		OverlapDuration         time.Duration `yaml:"overlap_duration"`
+		FullResyncInterval      time.Duration `yaml:"full_resync_interval"`
+		RequestTimeout          time.Duration `yaml:"request_timeout"`
+		MaxRetries              int           `yaml:"max_retries"`
 	} `yaml:"sync"`
 	Notifications struct {
 		ListenAddress string `yaml:"listen_address"`
@@ -37,7 +38,33 @@ type Config struct {
 		IncludeMeeting  bool     `yaml:"include_meeting"`
 		ExcludeIDs      []string `yaml:"exclude_ids"`
 	} `yaml:"chats"`
+	Mail Mail `yaml:"mail"`
 }
+
+type Mail struct {
+	IncludeReceived *bool         `yaml:"include_received"`
+	IncludeSent     *bool         `yaml:"include_sent"`
+	Addresses       []MailAddress `yaml:"addresses"`
+	Folders         struct {
+		Include []string `yaml:"include"`
+		Exclude []string `yaml:"exclude"`
+	} `yaml:"folders"`
+}
+
+type MailAddress struct {
+	Address string `yaml:"address"`
+	Name    string `yaml:"name"`
+	Enabled *bool  `yaml:"enabled"`
+	Match   struct {
+		Headers         []string `yaml:"headers"`
+		SubjectPrefixes []string `yaml:"subject_prefixes"`
+	} `yaml:"match"`
+}
+
+func (m Mail) ReceivedEnabled() bool  { return m.IncludeReceived == nil || *m.IncludeReceived }
+func (m Mail) SentEnabled() bool      { return m.IncludeSent == nil || *m.IncludeSent }
+func (a MailAddress) IsEnabled() bool { return a.Enabled == nil || *a.Enabled }
+
 type Team struct {
 	ID       string `yaml:"id"`
 	Enabled  bool   `yaml:"enabled"`
@@ -67,6 +94,15 @@ func Load(path string) (Config, error) {
 	if c.Sync.InitialLookbackDays == 0 {
 		c.Sync.InitialLookbackDays = 365
 	}
+	if c.Sync.MailInitialLookbackDays == 0 {
+		c.Sync.MailInitialLookbackDays = 365
+	}
+	if len(c.Mail.Folders.Include) == 0 {
+		c.Mail.Folders.Include = []string{"inbox", "sentitems", "archive"}
+	}
+	if len(c.Mail.Folders.Exclude) == 0 {
+		c.Mail.Folders.Exclude = []string{"deleteditems", "junkemail", "drafts", "outbox"}
+	}
 	if c.Sync.OverlapDuration == 0 {
 		c.Sync.OverlapDuration = 24 * time.Hour
 	}
@@ -90,9 +126,6 @@ func (c Config) Validate() error {
 	}
 	if c.Entra.ClientID == "" || strings.Contains(c.Entra.ClientID, "${") {
 		return fmt.Errorf("entra.client_id is required")
-	}
-	if c.Notifications.PublicURL == "" {
-		return fmt.Errorf("notifications.public_url is required")
 	}
 	return nil
 }
