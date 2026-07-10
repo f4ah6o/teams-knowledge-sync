@@ -60,6 +60,9 @@ func Load(path string) (Config, error) {
 	if c.Database.Path == "" {
 		c.Database.Path = "./data/teams-knowledge.db"
 	}
+	if !filepath.IsAbs(c.Database.Path) {
+		c.Database.Path = filepath.Join(filepath.Dir(path), c.Database.Path)
+	}
 	c.Database.Path = filepath.Clean(c.Database.Path)
 	if c.Sync.InitialLookbackDays == 0 {
 		c.Sync.InitialLookbackDays = 365
