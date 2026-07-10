@@ -34,3 +34,38 @@ func TestUpsertSearchAndDelete(t *testing.T) {
 		t.Fatalf("deleted search=%v err=%v", r, e)
 	}
 }
+
+func TestMailMoveDoesNotTombstoneNewFolderCopy(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "db.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	ctx := context.Background()
+	if err = s.ReplaceMailAddresses(ctx, []domain.MailAddress{{Address: "user@example.com"}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, folder := range []domain.MailFolder{{ID: "old", DisplayName: "Old", Enabled: true}, {ID: "new", DisplayName: "New", Enabled: true}} {
+		if err = s.UpsertMailFolder(ctx, folder); err != nil {
+			t.Fatal(err)
+		}
+	}
+	m := domain.MailMessage{ID: "m1", FolderID: "old", Subject: "move", BodyText: "body", RawJSON: []byte(`{}`), Matches: []domain.MailMatch{{Address: "user@example.com", MatchedBy: "to"}}}
+	if err = s.UpsertMailMessage(ctx, m); err != nil {
+		t.Fatal(err)
+	}
+	m.FolderID = "new"
+	if err = s.UpsertMailMessage(ctx, m); err != nil {
+		t.Fatal(err)
+	}
+	if err = s.TombstoneMailMessage(ctx, "old", "m1", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.MailMessage(ctx, "m1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.FolderID != "new" || got.DeletedAt != nil || got.BodyText != "body" {
+		t.Fatalf("message=%+v", got)
+	}
+}

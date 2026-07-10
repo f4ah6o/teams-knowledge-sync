@@ -3,6 +3,7 @@ package mail
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -35,15 +36,41 @@ func TestNormalizeAddressAndClassify(t *testing.T) {
 }
 
 type fakeGraph struct {
-	folder   json.RawMessage
-	messages []json.RawMessage
-	paths    []string
+	folder        json.RawMessage
+	messages      []json.RawMessage
+	paths         []string
+	folders       map[string]json.RawMessage
+	deltas        map[string]deltaPage
+	errors        map[string]error
+	errorContains map[string]error
 }
 
 func (f *fakeGraph) Do(_ context.Context, _ string, path string, _ any, out any) error {
 	f.paths = append(f.paths, path)
-	p := out.(*json.RawMessage)
-	*p = f.folder
+	if err := f.errors[path]; err != nil {
+		return err
+	}
+	for part, err := range f.errorContains {
+		if strings.Contains(path, part) {
+			return err
+		}
+	}
+	switch p := out.(type) {
+	case *json.RawMessage:
+		if raw := f.folders[path]; raw != nil {
+			*p = raw
+		} else {
+			*p = f.folder
+		}
+	case *deltaPage:
+		if page, ok := f.deltas[path]; ok {
+			*p = page
+		} else {
+			*p = deltaPage{Value: f.messages, DeltaLink: "delta-1"}
+		}
+	default:
+		return errors.New("unexpected output type")
+	}
 	return nil
 }
 func (f *fakeGraph) Page(_ context.Context, path string, fn func(json.RawMessage) error) error {
@@ -113,5 +140,139 @@ func TestSyncSkipsExcludedFolder(t *testing.T) {
 		if strings.Contains(path, "deleteditems") {
 			t.Fatalf("excluded folder requested: %v", g.paths)
 		}
+	}
+}
+
+func TestDeltaFollowsNextLinkAndTombstonesRemovedMessage(t *testing.T) {
+	db, err := store.Open(t.TempDir() + "/mail.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+	cfg := config.Config{}
+	cfg.Sync.MailInitialLookbackDays = 10
+	cfg.Mail.Folders.Include = []string{"inbox"}
+	cfg.Mail.Addresses = []config.MailAddress{{Address: "user@example.com", Enabled: boolp(true)}}
+	folder := json.RawMessage(`{"id":"f1","displayName":"Inbox"}`)
+	message := json.RawMessage(`{"id":"m1","conversationId":"c1","subject":"keep","body":{"contentType":"text","content":"body"},"toRecipients":[{"emailAddress":{"address":"user@example.com"}}],"receivedDateTime":"2026-07-09T00:00:00Z"}`)
+	g := &fakeGraph{folder: folder, messages: []json.RawMessage{message}}
+	s := Service{Graph: g, Store: db, Config: cfg}
+	if err = s.Sync(ctx, ""); err != nil {
+		t.Fatal(err)
+	}
+	g.messages = nil
+	g.deltas = map[string]deltaPage{"delta-1": {NextLink: "https://graph.microsoft.com/v1.0/next-opaque"}, "https://graph.microsoft.com/v1.0/next-opaque": {Value: []json.RawMessage{json.RawMessage(`{"id":"m1","@removed":{"reason":"deleted"}}`)}, DeltaLink: "https://graph.microsoft.com/v1.0/delta-new"}}
+	if err = s.Sync(ctx, ""); err != nil {
+		t.Fatal(err)
+	}
+	state, err := db.MailSyncState(ctx, "f1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.DeltaLink != "https://graph.microsoft.com/v1.0/delta-new" || state.NextLink != "" {
+		t.Fatalf("state=%+v", state)
+	}
+	results, err := db.SearchMail(ctx, domain.MailSearchFilter{})
+	if err != nil || len(results) != 0 {
+		t.Fatalf("results=%+v err=%v", results, err)
+	}
+	detail, err := db.MailMessage(ctx, "m1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.DeletedAt == nil || detail.BodyText != "" {
+		t.Fatalf("detail=%+v", detail)
+	}
+}
+
+func TestDeltaFailurePreservesProgressAndOtherFoldersContinue(t *testing.T) {
+	db, err := store.Open(t.TempDir() + "/mail.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+	cfg := config.Config{}
+	cfg.Sync.MailInitialLookbackDays = 10
+	cfg.Mail.Folders.Include = []string{"inbox", "archive"}
+	g := &fakeGraph{folders: map[string]json.RawMessage{"me/mailFolders/inbox": json.RawMessage(`{"id":"f1","displayName":"Inbox"}`), "me/mailFolders/archive": json.RawMessage(`{"id":"f2","displayName":"Archive"}`)}, errorContains: map[string]error{"mailFolders/f1/messages/delta": errors.New("graph GET: 403 Forbidden")}}
+	s := Service{Graph: g, Store: db, Config: cfg}
+	err = s.Sync(ctx, "")
+	if err == nil {
+		t.Fatal("expected one folder failure")
+	}
+	failed, _ := db.MailSyncState(ctx, "f1")
+	succeeded, _ := db.MailSyncState(ctx, "f2")
+	if failed.ConsecutiveFailures != 1 || failed.LastError == "" || succeeded.DeltaLink != "delta-1" {
+		t.Fatalf("failed=%+v succeeded=%+v", failed, succeeded)
+	}
+}
+
+func TestInvalidDeltaTokenReinitializesOnlyThatFolder(t *testing.T) {
+	db, err := store.Open(t.TempDir() + "/mail.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+	cfg := config.Config{}
+	cfg.Sync.MailInitialLookbackDays = 10
+	cfg.Mail.Folders.Include = []string{"inbox"}
+	_ = db.RecordMailSyncSuccess(ctx, "f1", "delta-old", time.Now())
+	g := &fakeGraph{folder: json.RawMessage(`{"id":"f1","displayName":"Inbox"}`), errors: map[string]error{"delta-old": errors.New("410 Gone: SyncStateNotFound")}}
+	if err = (&Service{Graph: g, Store: db, Config: cfg}).Sync(ctx, ""); err != nil {
+		t.Fatal(err)
+	}
+	state, _ := db.MailSyncState(ctx, "f1")
+	if state.DeltaLink != "delta-1" || state.ConsecutiveFailures != 0 {
+		t.Fatalf("state=%+v", state)
+	}
+}
+
+func TestDeltaFailureKeepsNextLinkWithoutAdvancingDeltaLink(t *testing.T) {
+	db, err := store.Open(t.TempDir() + "/mail.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+	_ = db.RecordMailSyncSuccess(ctx, "f1", "delta-old", time.Now())
+	cfg := config.Config{}
+	cfg.Sync.MailInitialLookbackDays = 1
+	cfg.Mail.Folders.Include = []string{"inbox"}
+	g := &fakeGraph{folder: json.RawMessage(`{"id":"f1","displayName":"Inbox"}`), deltas: map[string]deltaPage{"delta-old": {NextLink: "next-page"}}, errors: map[string]error{"next-page": errors.New("graph retry limit exceeded after 429")}}
+	err = (&Service{Graph: g, Store: db, Config: cfg}).Sync(ctx, "")
+	if err == nil {
+		t.Fatal("expected failure")
+	}
+	state, err := db.MailSyncState(ctx, "f1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.NextLink != "next-page" || state.DeltaLink != "delta-old" || state.ConsecutiveFailures != 1 {
+		t.Fatalf("state=%+v", state)
+	}
+}
+
+func TestDaemonRunsUntilContextCancellation(t *testing.T) {
+	db, err := store.Open(t.TempDir() + "/mail.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	cfg := config.Config{}
+	cfg.Sync.Interval = time.Millisecond
+	cfg.Sync.MailInitialLookbackDays = 1
+	cfg.Mail.Folders.Include = []string{"inbox"}
+	g := &fakeGraph{folder: json.RawMessage(`{"id":"f1","displayName":"Inbox"}`)}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
+	defer cancel()
+	err = (&Service{Graph: g, Store: db, Config: cfg}).Daemon(ctx)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err=%v", err)
+	}
+	if len(g.paths) < 4 {
+		t.Fatalf("daemon did not repeat: %v", g.paths)
 	}
 }

@@ -2,7 +2,7 @@
 
 Microsoft Teamsの指定チームと参加チャットをローカルSQLiteへ同期し、CLIとstdio MCPで検索するGoバイナリです。
 
-Outlook Mailは別の `outlook-knowledge` バイナリで、登録アドレスに関係するメールを指定フォルダーからローカルSQLiteへ初回同期し、CLI検索できます。
+Outlook Mailは別の `outlook-knowledge` バイナリで、登録アドレスに関係するメールを指定フォルダーからローカルSQLiteへ同期し、CLI検索できます。初回取得後はフォルダー単位のdeltaLinkで変更を追跡します。
 
 ## Setup
 
@@ -37,6 +37,7 @@ outlook-knowledge mail search "工事引継" [--address ADDRESS]
 outlook-knowledge mail show MESSAGE_ID
 outlook-knowledge mail thread MESSAGE_ID
 outlook-knowledge mail status [--json]
+outlook-knowledge mail daemon
 
 outlook-knowledge calendar auth login|status|logout
 outlook-knowledge calendar list

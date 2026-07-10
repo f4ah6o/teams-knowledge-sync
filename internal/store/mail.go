@@ -74,6 +74,9 @@ func (s *Store) UpsertMailMessage(ctx context.Context, m domain.MailMessage) err
 	if err != nil {
 		return err
 	}
+	if _, err = tx.ExecContext(ctx, `UPDATE mail_messages SET deleted_at='' WHERE id=?`, m.ID); err != nil {
+		return err
+	}
 	defer tx.Rollback()
 	now := stamp(time.Now())
 	_, err = tx.ExecContext(ctx, `INSERT INTO mail_messages(id,internet_message_id,conversation_id,conversation_index,folder_id,subject,body_html,body_text,body_preview,body_content_type,sender_address,sender_name,from_address,from_name,received_at,sent_at,created_at,modified_at,importance,is_read,is_draft,has_attachments,flag_status,web_url,etag,raw_json,indexed_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET internet_message_id=excluded.internet_message_id,conversation_id=excluded.conversation_id,conversation_index=excluded.conversation_index,folder_id=excluded.folder_id,subject=excluded.subject,body_html=excluded.body_html,body_text=excluded.body_text,body_preview=excluded.body_preview,body_content_type=excluded.body_content_type,sender_address=excluded.sender_address,sender_name=excluded.sender_name,from_address=excluded.from_address,from_name=excluded.from_name,received_at=excluded.received_at,sent_at=excluded.sent_at,created_at=excluded.created_at,modified_at=excluded.modified_at,importance=excluded.importance,is_read=excluded.is_read,is_draft=excluded.is_draft,has_attachments=excluded.has_attachments,flag_status=excluded.flag_status,web_url=excluded.web_url,etag=excluded.etag,raw_json=excluded.raw_json,indexed_at=excluded.indexed_at`, m.ID, m.InternetMessageID, m.ConversationID, m.ConversationIndex, m.FolderID, m.Subject, m.BodyHTML, m.BodyText, m.BodyPreview, m.BodyContentType, m.SenderAddress, m.SenderName, m.FromAddress, m.FromName, stampPtr(m.ReceivedAt), stampPtr(m.SentAt), stampPtr(m.CreatedAt), stampPtr(m.ModifiedAt), m.Importance, m.Read, m.Draft, m.HasAttachments, m.FlagStatus, m.WebURL, m.ETag, string(m.RawJSON), now)
@@ -132,7 +135,7 @@ func (s *Store) SearchMail(ctx context.Context, f domain.MailSearchFilter) ([]do
 	if f.Limit > 100 {
 		f.Limit = 100
 	}
-	where, args := []string{"1=1"}, []any{}
+	where, args := []string{"(m.deleted_at IS NULL OR m.deleted_at='')"}, []any{}
 	if f.Query != "" {
 		where = append(where, "(m.subject LIKE ? OR m.body_text LIKE ?)")
 		args = append(args, "%"+f.Query+"%", "%"+f.Query+"%")
@@ -203,18 +206,18 @@ func (s *Store) MailThread(ctx context.Context, id string) ([]domain.MailMessage
 	return s.SearchMailDetails(ctx, "m.conversation_id=?", conversation)
 }
 func (s *Store) SearchMailDetails(ctx context.Context, where string, arg any) ([]domain.MailMessage, error) {
-	rows, err := s.DB.QueryContext(ctx, `SELECT m.id,m.internet_message_id,m.conversation_id,m.conversation_index,m.folder_id,m.subject,m.body_html,m.body_text,m.body_preview,m.body_content_type,m.sender_address,m.sender_name,m.from_address,m.from_name,m.received_at,m.sent_at,m.created_at,m.modified_at,m.importance,m.is_read,m.is_draft,m.has_attachments,m.flag_status,m.web_url,m.etag,m.raw_json FROM mail_messages m WHERE `+where+` ORDER BY COALESCE(m.received_at,m.sent_at)`, arg)
+	rows, err := s.DB.QueryContext(ctx, `SELECT m.id,m.internet_message_id,m.conversation_id,m.conversation_index,m.folder_id,m.subject,m.body_html,m.body_text,m.body_preview,m.body_content_type,m.sender_address,m.sender_name,m.from_address,m.from_name,m.received_at,m.sent_at,m.created_at,m.modified_at,m.deleted_at,m.importance,m.is_read,m.is_draft,m.has_attachments,m.flag_status,m.web_url,m.etag,m.raw_json FROM mail_messages m WHERE `+where+` ORDER BY COALESCE(m.received_at,m.sent_at)`, arg)
 	if err != nil {
 		return nil, err
 	}
 	var out []domain.MailMessage
 	for rows.Next() {
 		var m domain.MailMessage
-		var received, sent, created, modified string
-		if err = rows.Scan(&m.ID, &m.InternetMessageID, &m.ConversationID, &m.ConversationIndex, &m.FolderID, &m.Subject, &m.BodyHTML, &m.BodyText, &m.BodyPreview, &m.BodyContentType, &m.SenderAddress, &m.SenderName, &m.FromAddress, &m.FromName, &received, &sent, &created, &modified, &m.Importance, &m.Read, &m.Draft, &m.HasAttachments, &m.FlagStatus, &m.WebURL, &m.ETag, &m.RawJSON); err != nil {
+		var received, sent, created, modified, deleted string
+		if err = rows.Scan(&m.ID, &m.InternetMessageID, &m.ConversationID, &m.ConversationIndex, &m.FolderID, &m.Subject, &m.BodyHTML, &m.BodyText, &m.BodyPreview, &m.BodyContentType, &m.SenderAddress, &m.SenderName, &m.FromAddress, &m.FromName, &received, &sent, &created, &modified, &deleted, &m.Importance, &m.Read, &m.Draft, &m.HasAttachments, &m.FlagStatus, &m.WebURL, &m.ETag, &m.RawJSON); err != nil {
 			return nil, err
 		}
-		m.ReceivedAt, m.SentAt, m.CreatedAt, m.ModifiedAt = parse(received), parse(sent), parse(created), parse(modified)
+		m.ReceivedAt, m.SentAt, m.CreatedAt, m.ModifiedAt, m.DeletedAt = parse(received), parse(sent), parse(created), parse(modified), parse(deleted)
 		out = append(out, m)
 	}
 	if err = rows.Err(); err != nil {
@@ -322,4 +325,63 @@ func (s *Store) MailStats(ctx context.Context) (map[string]int, error) {
 		out[key] = n
 	}
 	return out, nil
+}
+
+func (s *Store) MailSyncState(ctx context.Context, folderID string) (domain.MailSyncState, error) {
+	state := domain.MailSyncState{FolderID: folderID}
+	var attempt, success string
+	err := s.DB.QueryRowContext(ctx, `SELECT COALESCE(next_link,''),COALESCE(delta_link,''),COALESCE(last_attempt_at,''),COALESCE(last_success_at,''),COALESCE(last_error,''),consecutive_failures FROM mail_sync_states WHERE folder_id=?`, folderID).Scan(&state.NextLink, &state.DeltaLink, &attempt, &success, &state.LastError, &state.ConsecutiveFailures)
+	if err == sql.ErrNoRows {
+		return state, nil
+	}
+	if err != nil {
+		return state, err
+	}
+	state.LastAttemptAt = parse(attempt)
+	state.LastSuccessAt = parse(success)
+	return state, nil
+}
+func (s *Store) RecordMailSyncProgress(ctx context.Context, folderID, nextLink string, attemptedAt time.Time) error {
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO mail_sync_states(folder_id,next_link,last_attempt_at,consecutive_failures) VALUES(?,?,?,0) ON CONFLICT(folder_id) DO UPDATE SET next_link=excluded.next_link,last_attempt_at=excluded.last_attempt_at`, folderID, nextLink, stamp(attemptedAt))
+	return err
+}
+func (s *Store) RecordMailSyncSuccess(ctx context.Context, folderID, deltaLink string, at time.Time) error {
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO mail_sync_states(folder_id,next_link,delta_link,last_attempt_at,last_success_at,last_error,consecutive_failures) VALUES(?,'',?,?,?,'',0) ON CONFLICT(folder_id) DO UPDATE SET next_link='',delta_link=excluded.delta_link,last_attempt_at=excluded.last_attempt_at,last_success_at=excluded.last_success_at,last_error='',consecutive_failures=0`, folderID, deltaLink, stamp(at), stamp(at))
+	return err
+}
+func (s *Store) RecordMailSyncFailure(ctx context.Context, folderID string, at time.Time, syncErr error) error {
+	message := ""
+	if syncErr != nil {
+		message = syncErr.Error()
+	}
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO mail_sync_states(folder_id,last_attempt_at,last_error,consecutive_failures) VALUES(?,?,?,1) ON CONFLICT(folder_id) DO UPDATE SET last_attempt_at=excluded.last_attempt_at,last_error=excluded.last_error,consecutive_failures=mail_sync_states.consecutive_failures+1`, folderID, stamp(at), message)
+	return err
+}
+func (s *Store) ResetMailSyncToken(ctx context.Context, folderID string) error {
+	_, err := s.DB.ExecContext(ctx, `UPDATE mail_sync_states SET next_link='',delta_link='' WHERE folder_id=?`, folderID)
+	return err
+}
+func (s *Store) TombstoneMailMessage(ctx context.Context, folderID, id string, at time.Time) error {
+	tx, err := s.DB.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var rowID int64
+	err = tx.QueryRowContext(ctx, `SELECT row_id FROM mail_messages WHERE folder_id=? AND id=?`, folderID, id).Scan(&rowID)
+	if err == sql.ErrNoRows {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, `UPDATE mail_messages SET body_html='',body_text='',body_preview='',has_attachments=0,deleted_at=? WHERE row_id=?`, stamp(at), rowID); err != nil {
+		return err
+	}
+	for _, table := range []string{"mail_recipients", "mail_message_addresses", "mail_headers", "mail_attachments", "mail_categories", "mail_fts"} {
+		if _, err = tx.ExecContext(ctx, `DELETE FROM `+table+` WHERE message_row_id=?`, rowID); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
