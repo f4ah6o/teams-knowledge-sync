@@ -34,7 +34,7 @@ func Open(path string) (*Store, error) {
 func (s *Store) Close() error { return s.DB.Close() }
 func (s *Store) Migrate(ctx context.Context) error {
 	_, err := s.DB.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS containers (id TEXT PRIMARY KEY,type TEXT NOT NULL,team_id TEXT,channel_id TEXT,chat_id TEXT,display_name TEXT,description TEXT,web_url TEXT,is_enabled INTEGER NOT NULL DEFAULT 1,last_message_at TEXT,created_at TEXT NOT NULL,updated_at TEXT NOT NULL);
-CREATE TABLE IF NOT EXISTS messages (row_id INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT NOT NULL,container_id TEXT NOT NULL,parent_message_id TEXT,sender_id TEXT,sender_name TEXT,sender_type TEXT,body_html TEXT,body_text TEXT,message_type TEXT,subject TEXT,web_url TEXT,created_at TEXT,modified_at TEXT,deleted_at TEXT,etag TEXT,content_hash TEXT,raw_json TEXT NOT NULL,indexed_at TEXT,UNIQUE(container_id,id),FOREIGN KEY(container_id) REFERENCES containers(id));
+CREATE TABLE IF NOT EXISTS messages (row_id INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT NOT NULL,container_id TEXT NOT NULL,parent_message_id TEXT,sender_id TEXT,sender_name TEXT,sender_type TEXT,body_html TEXT,body_text TEXT,message_type TEXT,subject TEXT,web_url TEXT,created_at TEXT,modified_at TEXT,deleted_at TEXT,etag TEXT,content_hash TEXT,raw_json TEXT NOT NULL,indexed_at TEXT,has_image INTEGER NOT NULL DEFAULT 0,UNIQUE(container_id,id),FOREIGN KEY(container_id) REFERENCES containers(id));
 CREATE TABLE IF NOT EXISTS message_mentions (message_row_id INTEGER NOT NULL,mention_id INTEGER,mentioned_user_id TEXT,mentioned_name TEXT,mentioned_type TEXT,FOREIGN KEY(message_row_id) REFERENCES messages(row_id));
 CREATE TABLE IF NOT EXISTS message_reactions (message_row_id INTEGER NOT NULL,reaction_type TEXT NOT NULL,user_id TEXT,user_name TEXT,created_at TEXT,FOREIGN KEY(message_row_id) REFERENCES messages(row_id));
 CREATE TABLE IF NOT EXISTS attachments (id INTEGER PRIMARY KEY AUTOINCREMENT,message_row_id INTEGER NOT NULL,attachment_id TEXT,attachment_type TEXT,name TEXT,content_url TEXT,content_type TEXT,drive_item_id TEXT,raw_json TEXT,FOREIGN KEY(message_row_id) REFERENCES messages(row_id));
@@ -46,7 +46,13 @@ CREATE TABLE IF NOT EXISTS chat_exclusions (chat_id TEXT PRIMARY KEY,reason TEXT
 CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY,value TEXT NOT NULL);
 CREATE VIRTUAL TABLE IF NOT EXISTS message_fts USING fts5(message_row_id UNINDEXED,content, tokenize='unicode61');
 CREATE INDEX IF NOT EXISTS messages_container_created ON messages(container_id,created_at); CREATE INDEX IF NOT EXISTS messages_sender ON messages(sender_id);`)
-	return err
+	if err != nil {
+		return err
+	}
+	if _, e := s.DB.ExecContext(ctx, `ALTER TABLE messages ADD COLUMN has_image INTEGER NOT NULL DEFAULT 0`); e != nil && !strings.Contains(strings.ToLower(e.Error()), "duplicate column") {
+		return e
+	}
+	return nil
 }
 func stamp(t time.Time) string {
 	if t.IsZero() {
@@ -80,7 +86,7 @@ func (s *Store) UpsertMessage(ctx context.Context, m domain.Message) error {
 	}
 	defer tx.Rollback()
 	now := stamp(time.Now())
-	_, e = tx.ExecContext(ctx, `INSERT INTO messages(id,container_id,parent_message_id,sender_id,sender_name,sender_type,body_html,body_text,message_type,subject,web_url,created_at,modified_at,deleted_at,etag,raw_json,indexed_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(container_id,id) DO UPDATE SET parent_message_id=excluded.parent_message_id,sender_id=excluded.sender_id,sender_name=excluded.sender_name,sender_type=excluded.sender_type,body_html=excluded.body_html,body_text=excluded.body_text,message_type=excluded.message_type,subject=excluded.subject,web_url=excluded.web_url,modified_at=excluded.modified_at,deleted_at=excluded.deleted_at,etag=excluded.etag,raw_json=excluded.raw_json,indexed_at=excluded.indexed_at`, m.ID, m.ContainerID, m.ParentMessageID, m.SenderID, m.SenderName, m.SenderType, m.BodyHTML, m.BodyText, m.MessageType, m.Subject, m.WebURL, stamp(m.CreatedAt), stampPtr(m.ModifiedAt), stampPtr(m.DeletedAt), m.ETag, string(m.RawJSON), now)
+	_, e = tx.ExecContext(ctx, `INSERT INTO messages(id,container_id,parent_message_id,sender_id,sender_name,sender_type,body_html,body_text,message_type,subject,web_url,created_at,modified_at,deleted_at,etag,raw_json,indexed_at,has_image) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(container_id,id) DO UPDATE SET parent_message_id=excluded.parent_message_id,sender_id=excluded.sender_id,sender_name=excluded.sender_name,sender_type=excluded.sender_type,body_html=excluded.body_html,body_text=excluded.body_text,message_type=excluded.message_type,subject=excluded.subject,web_url=excluded.web_url,modified_at=excluded.modified_at,deleted_at=excluded.deleted_at,etag=excluded.etag,raw_json=excluded.raw_json,indexed_at=excluded.indexed_at,has_image=excluded.has_image`, m.ID, m.ContainerID, m.ParentMessageID, m.SenderID, m.SenderName, m.SenderType, m.BodyHTML, m.BodyText, m.MessageType, m.Subject, m.WebURL, stamp(m.CreatedAt), stampPtr(m.ModifiedAt), stampPtr(m.DeletedAt), m.ETag, string(m.RawJSON), now, m.HasImage)
 	if e != nil {
 		return e
 	}
@@ -283,7 +289,9 @@ func (s *Store) GetMessage(ctx context.Context, containerID, messageID string) (
 	var m domain.Message
 	var created, modified, deleted string
 	var raw string
-	err := s.DB.QueryRowContext(ctx, `SELECT id,container_id,parent_message_id,sender_id,sender_name,sender_type,body_html,body_text,message_type,subject,web_url,created_at,modified_at,deleted_at,etag,raw_json FROM messages WHERE container_id=? AND id=?`, containerID, messageID).Scan(&m.ID, &m.ContainerID, &m.ParentMessageID, &m.SenderID, &m.SenderName, &m.SenderType, &m.BodyHTML, &m.BodyText, &m.MessageType, &m.Subject, &m.WebURL, &created, &modified, &deleted, &m.ETag, &raw)
+	var hasImage int
+	err := s.DB.QueryRowContext(ctx, `SELECT id,container_id,parent_message_id,sender_id,sender_name,sender_type,body_html,body_text,message_type,subject,web_url,created_at,modified_at,deleted_at,etag,raw_json,has_image FROM messages WHERE container_id=? AND id=?`, containerID, messageID).Scan(&m.ID, &m.ContainerID, &m.ParentMessageID, &m.SenderID, &m.SenderName, &m.SenderType, &m.BodyHTML, &m.BodyText, &m.MessageType, &m.Subject, &m.WebURL, &created, &modified, &deleted, &m.ETag, &raw, &hasImage)
+	m.HasImage = hasImage != 0
 	if err != nil {
 		return m, err
 	}

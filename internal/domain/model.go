@@ -10,6 +10,7 @@ type Container struct {
 type Message struct {
 	ID, ContainerID, ParentMessageID, SenderID, SenderName, SenderType, BodyHTML, BodyText, MessageType, Subject, WebURL, ETag string
 	CreatedAt                                                                                                                  time.Time
+	HasImage                                                                                                                   bool
 	ModifiedAt, DeletedAt                                                                                                      *time.Time
 	RawJSON                                                                                                                    []byte
 	Mentions                                                                                                                   []Mention

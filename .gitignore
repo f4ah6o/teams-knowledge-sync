@@ -2,6 +2,6 @@ data/
 *.db
 *.db-shm
 *.db-wal
-teams-knowledge
-teams
+/teams-knowledge
+/teams
 config.yaml

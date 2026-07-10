@@ -228,6 +228,12 @@ func Message(raw json.RawMessage, containerID, parent string) (domain.Message, e
 				DisplayName string `json:"displayName"`
 			} `json:"user"`
 		} `json:"from"`
+		Attachments []struct {
+			ID          string `json:"id"`
+			Name        string `json:"name"`
+			ContentType string `json:"contentType"`
+			ContentURL  string `json:"contentUrl"`
+		} `json:"attachments"`
 	}
 	if e := json.Unmarshal(raw, &v); e != nil {
 		return domain.Message{}, e
@@ -237,6 +243,15 @@ func Message(raw json.RawMessage, containerID, parent string) (domain.Message, e
 		return domain.Message{}, fmt.Errorf("message %s created: %w", v.ID, e)
 	}
 	m := domain.Message{ID: v.ID, ContainerID: containerID, ParentMessageID: parent, SenderID: v.From.User.ID, SenderName: v.From.User.DisplayName, BodyHTML: v.Body.Content, BodyText: text.PlainHTML(v.Body.Content), Subject: v.Subject, MessageType: v.MessageType, WebURL: v.WebURL, CreatedAt: created, ETag: v.ETag, RawJSON: raw}
+	for _, a := range v.Attachments {
+		m.Attachments = append(m.Attachments, domain.Attachment{ID: a.ID, Name: a.Name, ContentType: a.ContentType, ContentURL: a.ContentURL})
+		if strings.HasPrefix(strings.ToLower(a.ContentType), "image/") {
+			m.HasImage = true
+		}
+	}
+	if strings.Contains(strings.ToLower(v.Body.Content), "<img") {
+		m.HasImage = true
+	}
 	if v.Modified != "" {
 		t, _ := time.Parse(time.RFC3339, v.Modified)
 		m.ModifiedAt = &t
