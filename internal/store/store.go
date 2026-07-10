@@ -16,6 +16,16 @@ import (
 
 type Store struct{ DB *sql.DB }
 
+type SyncState struct {
+	ResourceType        string
+	ResourceID          string
+	LastAttemptAt       *time.Time
+	LastSuccessAt       *time.Time
+	LastFullSyncAt      *time.Time
+	LastError           string
+	ConsecutiveFailures int
+}
+
 func Open(path string) (*Store, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return nil, err
@@ -228,6 +238,37 @@ func (s *Store) State(ctx context.Context, k string) (string, error) {
 func (s *Store) SetState(ctx context.Context, k, v string) error {
 	_, e := s.DB.ExecContext(ctx, `INSERT INTO app_state(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, k, v)
 	return e
+}
+
+func (s *Store) GetSyncState(ctx context.Context, resourceType, resourceID string) (SyncState, error) {
+	var state SyncState
+	var attempt, success, full string
+	state.ResourceType, state.ResourceID = resourceType, resourceID
+	err := s.DB.QueryRowContext(ctx, `SELECT last_attempt_at,last_success_at,last_full_sync_at,last_error,consecutive_failures FROM sync_states WHERE resource_type=? AND resource_id=?`, resourceType, resourceID).Scan(&attempt, &success, &full, &state.LastError, &state.ConsecutiveFailures)
+	if err == sql.ErrNoRows {
+		return state, nil
+	}
+	if err != nil {
+		return state, err
+	}
+	state.LastAttemptAt = parse(attempt)
+	state.LastSuccessAt = parse(success)
+	state.LastFullSyncAt = parse(full)
+	return state, nil
+}
+
+func (s *Store) RecordSyncSuccess(ctx context.Context, resourceType, resourceID string, startedAt, completedAt time.Time) error {
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO sync_states(resource_type,resource_id,last_attempt_at,last_success_at,last_full_sync_at,last_error,consecutive_failures) VALUES(?,?,?,?,?,?,0) ON CONFLICT(resource_type,resource_id) DO UPDATE SET last_attempt_at=excluded.last_attempt_at,last_success_at=excluded.last_success_at,last_full_sync_at=COALESCE(sync_states.last_full_sync_at,excluded.last_full_sync_at),last_error='',consecutive_failures=0`, resourceType, resourceID, stamp(completedAt), stamp(startedAt), stamp(startedAt), "")
+	return err
+}
+
+func (s *Store) RecordSyncFailure(ctx context.Context, resourceType, resourceID string, attemptedAt time.Time, syncErr error) error {
+	message := ""
+	if syncErr != nil {
+		message = syncErr.Error()
+	}
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO sync_states(resource_type,resource_id,last_attempt_at,last_error,consecutive_failures) VALUES(?,?,?,?,1) ON CONFLICT(resource_type,resource_id) DO UPDATE SET last_attempt_at=excluded.last_attempt_at,last_error=excluded.last_error,consecutive_failures=sync_states.consecutive_failures+1`, resourceType, resourceID, stamp(attemptedAt), message)
+	return err
 }
 func (s *Store) Stats(ctx context.Context) (map[string]any, error) {
 	var messages, containers int
