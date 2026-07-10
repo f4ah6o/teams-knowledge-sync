@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/obr-grp/teams-knowledge-sync/internal/auth"
@@ -121,6 +123,12 @@ func calendarCmd(ctx context.Context, s calendarservice.Service, db *store.Store
 			fmt.Println(string(b))
 		} else {
 			fmt.Printf("calendars: %d\nevents: %d\n", values["calendars"], values["events"])
+		}
+	case "daemon":
+		daemonCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		if err := s.DeltaDaemon(daemonCtx); err != nil && !errors.Is(err, context.Canceled) {
+			must(err)
 		}
 	default:
 		usage()

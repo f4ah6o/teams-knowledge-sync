@@ -70,6 +70,9 @@ CREATE TABLE IF NOT EXISTS calendar_locations (event_row_id INTEGER NOT NULL,nam
 CREATE TABLE IF NOT EXISTS calendar_categories (event_row_id INTEGER NOT NULL,category TEXT NOT NULL,PRIMARY KEY(event_row_id,category),FOREIGN KEY(event_row_id) REFERENCES calendar_events(row_id));
 CREATE TABLE IF NOT EXISTS calendar_attachments (event_row_id INTEGER NOT NULL,id TEXT NOT NULL,name TEXT,content_type TEXT,size INTEGER,is_inline INTEGER,raw_json TEXT,PRIMARY KEY(event_row_id,id),FOREIGN KEY(event_row_id) REFERENCES calendar_events(row_id));
 CREATE VIRTUAL TABLE IF NOT EXISTS calendar_fts USING fts5(event_row_id UNINDEXED,content,tokenize='unicode61');
+CREATE TABLE IF NOT EXISTS calendar_sync_windows (calendar_id TEXT NOT NULL,window_start_utc TEXT NOT NULL,window_end_utc TEXT NOT NULL,next_link TEXT,delta_link TEXT,last_attempt_at TEXT,last_success_at TEXT,last_error TEXT,consecutive_failures INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(calendar_id,window_start_utc,window_end_utc),FOREIGN KEY(calendar_id) REFERENCES calendars(id));
+CREATE TABLE IF NOT EXISTS calendar_window_events (calendar_id TEXT NOT NULL,window_start_utc TEXT NOT NULL,window_end_utc TEXT NOT NULL,event_id TEXT NOT NULL,PRIMARY KEY(calendar_id,window_start_utc,window_end_utc,event_id));
+CREATE TABLE IF NOT EXISTS calendar_window_seen (calendar_id TEXT NOT NULL,window_start_utc TEXT NOT NULL,window_end_utc TEXT NOT NULL,event_id TEXT NOT NULL,PRIMARY KEY(calendar_id,window_start_utc,window_end_utc,event_id));
 CREATE VIRTUAL TABLE IF NOT EXISTS message_fts USING fts5(message_row_id UNINDEXED,content, tokenize='unicode61');
 CREATE INDEX IF NOT EXISTS messages_container_created ON messages(container_id,created_at); CREATE INDEX IF NOT EXISTS messages_sender ON messages(sender_id);`)
 	if err != nil {

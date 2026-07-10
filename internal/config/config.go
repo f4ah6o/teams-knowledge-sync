@@ -21,6 +21,7 @@ type Config struct {
 	Sync struct {
 		InitialLookbackDays     int           `yaml:"initial_lookback_days"`
 		MailInitialLookbackDays int           `yaml:"mail_initial_lookback_days"`
+		Interval                time.Duration `yaml:"interval"`
 		OverlapDuration         time.Duration `yaml:"overlap_duration"`
 		FullResyncInterval      time.Duration `yaml:"full_resync_interval"`
 		RequestTimeout          time.Duration `yaml:"request_timeout"`
@@ -119,6 +120,9 @@ func Load(path string) (Config, error) {
 	}
 	if c.Sync.MailInitialLookbackDays == 0 {
 		c.Sync.MailInitialLookbackDays = 365
+	}
+	if c.Sync.Interval == 0 {
+		c.Sync.Interval = 5 * time.Minute
 	}
 	if len(c.Mail.Folders.Include) == 0 {
 		c.Mail.Folders.Include = []string{"inbox", "sentitems", "archive"}

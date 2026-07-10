@@ -116,3 +116,10 @@ type CalendarSearchResult struct {
 	CalendarEvent
 	Snippet, CalendarName string
 }
+type CalendarSyncWindow struct {
+	CalendarID                     string
+	StartUTC, EndUTC               time.Time
+	NextLink, DeltaLink, LastError string
+	LastAttemptAt, LastSuccessAt   *time.Time
+	ConsecutiveFailures            int
+}

@@ -28,6 +28,7 @@ calendar:
     store_details: false
     expose_to_mcp: false
 sync:
+  interval: 5m
   mail_initial_lookback_days: 365
   request_timeout: 30s
   max_retries: 5
