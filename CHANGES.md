@@ -4,6 +4,7 @@
 
 ### Added
 
+- Outlook予定表を指定期間で初回同期し、日付・期間・キーワード検索と詳細表示ができる `outlook-knowledge calendar` CLIを追加した。(`issues/done/20260710-add-calendar-cli-sync.md`)
 - 登録アドレスに関係するOutlookメールを指定フォルダーから初回同期し、検索・詳細表示・スレッド表示できる `outlook-knowledge mail` CLIを追加した。(`issues/done/20260710-add-mail-cli-sync.md`)
 
 ### Changed

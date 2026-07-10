@@ -38,7 +38,30 @@ type Config struct {
 		IncludeMeeting  bool     `yaml:"include_meeting"`
 		ExcludeIDs      []string `yaml:"exclude_ids"`
 	} `yaml:"chats"`
-	Mail Mail `yaml:"mail"`
+	Mail     Mail     `yaml:"mail"`
+	Calendar Calendar `yaml:"calendar"`
+}
+
+type Calendar struct {
+	Calendars []CalendarSelection `yaml:"calendars"`
+	Range     struct {
+		PastDays   int `yaml:"past_days"`
+		FutureDays int `yaml:"future_days"`
+	} `yaml:"range"`
+	DisplayTimezone string `yaml:"display_timezone"`
+	PrivateEvents   struct {
+		StoreDetails *bool `yaml:"store_details"`
+		ExposeToMCP  *bool `yaml:"expose_to_mcp"`
+	} `yaml:"private_events"`
+}
+type CalendarSelection struct {
+	ID      string `yaml:"id"`
+	Enabled *bool  `yaml:"enabled"`
+}
+
+func (c CalendarSelection) IsEnabled() bool { return c.Enabled == nil || *c.Enabled }
+func (c Calendar) StorePrivateDetails() bool {
+	return c.PrivateEvents.StoreDetails != nil && *c.PrivateEvents.StoreDetails
 }
 
 type Mail struct {
@@ -102,6 +125,18 @@ func Load(path string) (Config, error) {
 	}
 	if len(c.Mail.Folders.Exclude) == 0 {
 		c.Mail.Folders.Exclude = []string{"deleteditems", "junkemail", "drafts", "outbox"}
+	}
+	if len(c.Calendar.Calendars) == 0 {
+		c.Calendar.Calendars = []CalendarSelection{{ID: "primary"}}
+	}
+	if c.Calendar.Range.PastDays == 0 {
+		c.Calendar.Range.PastDays = 1095
+	}
+	if c.Calendar.Range.FutureDays == 0 {
+		c.Calendar.Range.FutureDays = 365
+	}
+	if c.Calendar.DisplayTimezone == "" {
+		c.Calendar.DisplayTimezone = "Asia/Tokyo"
 	}
 	if c.Sync.OverlapDuration == 0 {
 		c.Sync.OverlapDuration = 24 * time.Hour

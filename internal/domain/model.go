@@ -81,3 +81,38 @@ type MailSearchResult struct {
 	MailMessage
 	Snippet string
 }
+
+type Calendar struct {
+	ID, Name, Color, HexColor, OwnerName, OwnerAddress  string
+	Default, CanEdit, CanShare, CanViewPrivate, Enabled bool
+}
+type CalendarAttendee struct{ Type, Name, Address, Response string }
+type CalendarLocation struct{ Name, Address, LocationType, UniqueID, UniqueIDType string }
+type CalendarAttachment struct {
+	ID, Name, ContentType string
+	Size                  int
+	Inline                bool
+	RawJSON               []byte
+}
+type CalendarEvent struct {
+	ID, CalendarID, ICalUID, SeriesMasterID, Type, Subject, BodyHTML, BodyText, BodyPreview          string
+	StartUTC, EndUTC                                                                                 time.Time
+	StartTimezone, EndTimezone, OriginalStartTimezone, OriginalEndTimezone                           string
+	AllDay, Cancelled, OnlineMeeting, Organizer, Draft, HasAttachments                               bool
+	OrganizerName, OrganizerAddress, Response, TeamsJoinURL, WebURL, Sensitivity, ShowAs, Importance string
+	CreatedAt, ModifiedAt, DeletedAt                                                                 *time.Time
+	Attendees                                                                                        []CalendarAttendee
+	Locations                                                                                        []CalendarLocation
+	Categories                                                                                       []string
+	Attachments                                                                                      []CalendarAttachment
+	RawJSON                                                                                          []byte
+}
+type CalendarSearchFilter struct {
+	Query, CalendarID string
+	From, To          *time.Time
+	Limit             int
+}
+type CalendarSearchResult struct {
+	CalendarEvent
+	Snippet, CalendarName string
+}

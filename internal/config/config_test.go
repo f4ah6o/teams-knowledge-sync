@@ -22,4 +22,7 @@ func TestLoadMailDefaultsAndExplicitFlags(t *testing.T) {
 	if cfg.Sync.MailInitialLookbackDays != 365 || len(cfg.Mail.Folders.Include) != 3 || !filepath.IsAbs(cfg.Database.Path) {
 		t.Fatalf("cfg=%+v", cfg)
 	}
+	if len(cfg.Calendar.Calendars) != 1 || cfg.Calendar.Calendars[0].ID != "primary" || cfg.Calendar.Range.PastDays != 1095 || cfg.Calendar.DisplayTimezone != "Asia/Tokyo" {
+		t.Fatalf("calendar defaults=%+v", cfg.Calendar)
+	}
 }

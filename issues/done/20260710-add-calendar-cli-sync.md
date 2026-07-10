@@ -1,7 +1,7 @@
 # Outlook Calendar CLI初回同期を追加する
 
-Status: polished
-Model: unknown
+Status: done
+Model: GPT-5
 Created: 2026-07-10
 Updated: 2026-07-10
 Branch: feat/20260710-calendar-cli-sync
@@ -31,6 +31,8 @@ Branch: feat/20260710-calendar-cli-sync
 
 ## 提案する方針
 
+以下の方針どおり実装した。
+
 - Mailと同じ `outlook-knowledge` バイナリ、認証、Graphクライアント、SQLiteを共有する。
 - `calendar.calendars`、`calendar.range`、`display_timezone`、非公開予定の保存・公開設定を追加する。
 - 予定表一覧を取得し、指定した `[from,to)` のcalendarViewをページングする。
@@ -40,12 +42,12 @@ Branch: feat/20260710-calendar-cli-sync
 
 ## 受け入れ条件
 
-- [ ] 既定予定表を含む予定表一覧を取得し、同期対象を選択できる。
-- [ ] 指定期間のcalendarViewを複数ページ取得して重複なく保存できる。
-- [ ] 単発、定期発生、例外、終日、キャンセル、Teams会議を識別できる。
-- [ ] UTC、元タイムゾーン、主催者、出席者、場所、会議URL、Outlook URLを保持できる。
-- [ ] 非公開予定を設定に従いマスクまたは保存できる。
-- [ ] 日付・期間・キーワードで保存済み予定を検索できる。
+- [x] 既定予定表を含む予定表一覧を取得し、同期対象を選択できる。
+- [x] 指定期間のcalendarViewを複数ページ取得して重複なく保存できる。
+- [x] 単発、定期発生、例外、終日、キャンセル、Teams会議を識別できる。
+- [x] UTC、元タイムゾーン、主催者、出席者、場所、会議URL、Outlook URLを保持できる。
+- [x] 非公開予定を設定に従いマスクまたは保存できる。
+- [x] 日付・期間・キーワードで保存済み予定を検索できる。
 
 ## テスト計画
 
@@ -69,3 +71,7 @@ Branch: feat/20260710-calendar-cli-sync
 ## 注記
 
 Calendar deltaとウィンドウ管理は次のイシューで実装する。
+
+- 2026-07-10: outlook-knowledge共有基盤の完了を受け、Calendar CLI初回同期の実装へ着手。
+- 2026-07-10: `go test -race ./...`、`go vet ./...`、CLIの`calendar status --json`が成功した。UTC変換、単発・発生・例外・series master、終日、キャンセル、Teams会議、非公開マスク、重複UPSERT、境界検索を自動検証した。Microsoft 365実環境確認は資格情報が必要なため未実施。
+- 2026-07-10: Calendar CLI初回同期、保存、検索、非公開マスクの実装と検証が完了したため完了。

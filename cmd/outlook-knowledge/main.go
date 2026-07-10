@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/obr-grp/teams-knowledge-sync/internal/auth"
+	calendarservice "github.com/obr-grp/teams-knowledge-sync/internal/calendar"
 	"github.com/obr-grp/teams-knowledge-sync/internal/config"
 	"github.com/obr-grp/teams-knowledge-sync/internal/domain"
 	"github.com/obr-grp/teams-knowledge-sync/internal/graph"
@@ -21,7 +22,7 @@ import (
 )
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: outlook-knowledge [-config config.yaml] mail <auth|address|folder|sync|search|show|thread|status> ...")
+	fmt.Fprintln(os.Stderr, "usage: outlook-knowledge [-config config.yaml] <mail|calendar> <command> ...")
 }
 
 func main() {
@@ -38,7 +39,7 @@ func main() {
 		usage()
 		return
 	}
-	if args[0] != "mail" {
+	if args[0] != "mail" && args[0] != "calendar" {
 		usage()
 		os.Exit(2)
 	}
@@ -61,11 +62,148 @@ func main() {
 		log.Fatal(err)
 	}
 	defer db.Close()
-	a := auth.NewWithScopes(cfg.Entra.TenantID, cfg.Entra.ClientID, "User.Read", "Mail.Read")
+	scope := "Mail.Read"
+	if args[0] == "calendar" {
+		scope = "Calendars.Read"
+	}
+	a := auth.NewWithScopes(cfg.Entra.TenantID, cfg.Entra.ClientID, "User.Read", scope)
 	g := graph.New(a, cfg.Sync.RequestTimeout, cfg.Sync.MaxRetries)
-	s := mailservice.Service{Graph: g, Store: db, Config: cfg}
 	ctx := context.Background()
-	mailCmd(ctx, s, db, a, args[1:])
+	if args[0] == "mail" {
+		mailCmd(ctx, mailservice.Service{Graph: g, Store: db, Config: cfg}, db, a, args[1:])
+		return
+	}
+	calendarCmd(ctx, calendarservice.Service{Graph: g, Store: db, Config: cfg}, db, a, cfg, args[1:])
+}
+
+func calendarCmd(ctx context.Context, s calendarservice.Service, db *store.Store, a *auth.Manager, cfg config.Config, args []string) {
+	if len(args) == 0 {
+		usage()
+		return
+	}
+	switch args[0] {
+	case "auth":
+		authCmd(ctx, a, args[1:])
+	case "list":
+		values, err := s.DiscoverCalendars(ctx)
+		must(err)
+		for _, c := range values {
+			fmt.Printf("%s\t%s\tdefault=%t\tenabled=%t\n", c.ID, c.Name, c.Default, c.Enabled)
+		}
+	case "show":
+		if len(args) < 2 {
+			log.Fatal("calendar show CALENDAR_ID")
+		}
+		c, err := db.Calendar(ctx, args[1])
+		must(err)
+		b, _ := json.MarshalIndent(c, "", "  ")
+		fmt.Println(string(b))
+	case "sync":
+		calendarSyncCmd(ctx, s, cfg, args[1:])
+	case "search":
+		calendarSearchCmd(ctx, db, cfg, args[1:])
+	case "day":
+		calendarDayCmd(ctx, db, cfg, args[1:])
+	case "range":
+		calendarRangeCmd(ctx, db, cfg, args[1:])
+	case "show-event":
+		if len(args) < 2 {
+			log.Fatal("calendar show-event EVENT_ID")
+		}
+		e, err := db.CalendarEvent(ctx, args[1])
+		must(err)
+		printEvent(e, mustLocation(cfg.Calendar.DisplayTimezone))
+	case "status":
+		values, err := db.CalendarStats(ctx)
+		must(err)
+		if len(args) > 1 && args[1] == "--json" {
+			b, _ := json.MarshalIndent(values, "", "  ")
+			fmt.Println(string(b))
+		} else {
+			fmt.Printf("calendars: %d\nevents: %d\n", values["calendars"], values["events"])
+		}
+	default:
+		usage()
+	}
+}
+func calendarSyncCmd(ctx context.Context, s calendarservice.Service, cfg config.Config, args []string) {
+	f := flag.NewFlagSet("calendar sync", flag.ExitOnError)
+	id := f.String("calendar", "", "calendar ID or primary")
+	from := f.String("from", "", "date or RFC3339")
+	to := f.String("to", "", "date or RFC3339")
+	_ = f.Parse(args)
+	loc := mustLocation(cfg.Calendar.DisplayTimezone)
+	fromTime := parseCalendarTime(*from, loc)
+	toTime := parseCalendarTime(*to, loc)
+	must(s.Sync(ctx, *id, fromTime, toTime))
+}
+func calendarSearchCmd(ctx context.Context, db *store.Store, cfg config.Config, args []string) {
+	f := flag.NewFlagSet("calendar search", flag.ExitOnError)
+	id := f.String("calendar", "", "calendar ID")
+	from := f.String("from", "", "date or RFC3339")
+	to := f.String("to", "", "date or RFC3339")
+	limit := f.Int("limit", 50, "limit")
+	_ = f.Parse(args)
+	loc := mustLocation(cfg.Calendar.DisplayTimezone)
+	filter := domain.CalendarSearchFilter{Query: strings.Join(f.Args(), " "), CalendarID: *id, From: parseCalendarTime(*from, loc), To: parseCalendarTime(*to, loc), Limit: *limit}
+	values, err := db.SearchCalendarEvents(ctx, filter)
+	must(err)
+	for _, e := range values {
+		printEvent(e.CalendarEvent, loc)
+	}
+}
+func calendarDayCmd(ctx context.Context, db *store.Store, cfg config.Config, args []string) {
+	if len(args) < 1 {
+		log.Fatal("calendar day YYYY-MM-DD")
+	}
+	loc := mustLocation(cfg.Calendar.DisplayTimezone)
+	from := mustDate(args[0], loc)
+	to := from.AddDate(0, 0, 1)
+	values, err := db.SearchCalendarEvents(ctx, domain.CalendarSearchFilter{From: &from, To: &to, Limit: 500})
+	must(err)
+	for _, e := range values {
+		printEvent(e.CalendarEvent, loc)
+	}
+}
+func calendarRangeCmd(ctx context.Context, db *store.Store, cfg config.Config, args []string) {
+	if len(args) < 2 {
+		log.Fatal("calendar range FROM TO")
+	}
+	loc := mustLocation(cfg.Calendar.DisplayTimezone)
+	from := mustDate(args[0], loc)
+	to := mustDate(args[1], loc)
+	values, err := db.SearchCalendarEvents(ctx, domain.CalendarSearchFilter{From: &from, To: &to, Limit: 500})
+	must(err)
+	for _, e := range values {
+		printEvent(e.CalendarEvent, loc)
+	}
+}
+func printEvent(e domain.CalendarEvent, loc *time.Location) {
+	fmt.Printf("%s\t%s - %s\t%s\t%s\n", e.ID, e.StartUTC.In(loc).Format(time.RFC3339), e.EndUTC.In(loc).Format(time.RFC3339), e.Subject, e.WebURL)
+}
+func mustLocation(name string) *time.Location {
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return loc
+}
+func parseCalendarTime(raw string, loc *time.Location) *time.Time {
+	if raw == "" {
+		return nil
+	}
+	if t, err := time.Parse(time.RFC3339, raw); err == nil {
+		return &t
+	}
+	t := mustDate(raw, loc)
+	return &t
+}
+func mustDate(raw string, loc *time.Location) time.Time {
+	t, err := time.ParseInLocation("2006-01-02", raw, loc)
+	if err != nil {
+		log.Fatal(err)
+	}
+	return t
 }
 
 func mailCmd(ctx context.Context, s mailservice.Service, db *store.Store, a *auth.Manager, args []string) {
@@ -124,7 +262,7 @@ func mailCmd(ctx context.Context, s mailservice.Service, db *store.Store, a *aut
 
 func authCmd(ctx context.Context, a *auth.Manager, args []string) {
 	if len(args) == 0 {
-		log.Fatal("mail auth login|status|logout")
+		log.Fatal("auth login|status|logout")
 	}
 	switch args[0] {
 	case "login":
@@ -139,7 +277,7 @@ func authCmd(ctx context.Context, a *auth.Manager, args []string) {
 	case "logout":
 		must(a.Logout())
 	default:
-		log.Fatal("mail auth login|status|logout")
+		log.Fatal("auth login|status|logout")
 	}
 }
 func syncCmd(ctx context.Context, s mailservice.Service, args []string) {
