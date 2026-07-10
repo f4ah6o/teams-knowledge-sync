@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
@@ -33,6 +34,16 @@ func main() {
 	fs := flag.NewFlagSet("teams-knowledge", flag.ContinueOnError)
 	cfgPath := fs.String("config", "config.yaml", "config path")
 	_ = fs.Parse(os.Args[1:])
+	if *cfgPath == "config.yaml" {
+		if _, err := os.Stat(*cfgPath); os.IsNotExist(err) {
+			if exe, e := os.Executable(); e == nil {
+				candidate := filepath.Join(filepath.Dir(exe), "config.yaml")
+				if _, e = os.Stat(candidate); e == nil {
+					*cfgPath = candidate
+				}
+			}
+		}
+	}
 	args := fs.Args()
 	if len(args) == 0 {
 		usage()
