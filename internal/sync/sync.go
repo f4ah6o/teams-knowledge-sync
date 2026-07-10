@@ -12,14 +12,24 @@ import (
 	"github.com/obr-grp/teams-knowledge-sync/internal/text"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
 
 type Service struct {
-	Graph         *graph.Client
-	Store         *store.Store
-	ExcludedChats map[string]bool
+	Graph               GraphAPI
+	Store               *store.Store
+	ExcludedChats       map[string]bool
+	InitialLookbackDays int
+	OverlapDuration     time.Duration
+	Now                 func() time.Time
+}
+
+type GraphAPI interface {
+	Do(context.Context, string, string, any, any) error
+	Page(context.Context, string, func(json.RawMessage) error) error
+	PageUntil(context.Context, string, func(json.RawMessage) (bool, error)) error
 }
 type resource struct {
 	ID          string `json:"id"`
@@ -91,38 +101,113 @@ func (s Service) SyncChats(ctx context.Context) error {
 	})
 }
 func (s Service) SyncChannel(ctx context.Context, c domain.Container) error {
-	return s.Graph.Page(ctx, "teams/"+graph.Escape(c.TeamID)+"/channels/"+graph.Escape(c.ChannelID)+"/messages?$expand=replies", func(raw json.RawMessage) error {
-		m, e := message(raw, c.ID, "")
-		if e != nil {
-			return e
-		}
-		if e = s.Store.UpsertMessage(ctx, m); e != nil {
-			return e
-		}
-		var v struct {
-			Replies []json.RawMessage `json:"replies"`
-		}
-		_ = json.Unmarshal(raw, &v)
-		for _, reply := range v.Replies {
-			r, e := message(reply, c.ID, m.ID)
+	return s.syncResource(ctx, "channel", c.ID, func(ctx context.Context, since time.Time) error {
+		path := "teams/" + graph.Escape(c.TeamID) + "/channels/" + graph.Escape(c.ChannelID) + "/messages?$top=50&$expand=replies"
+		return s.Graph.PageUntil(ctx, path, func(raw json.RawMessage) (bool, error) {
+			m, e := message(raw, c.ID, "")
 			if e != nil {
-				return e
+				return false, e
 			}
-			if e = s.Store.UpsertMessage(ctx, r); e != nil {
-				return e
+			if e = s.Store.UpsertMessage(ctx, m); e != nil {
+				return false, e
 			}
-		}
-		return nil
+			var v struct {
+				Replies     []json.RawMessage `json:"replies"`
+				RepliesNext string            `json:"replies@odata.nextLink"`
+			}
+			_ = json.Unmarshal(raw, &v)
+			for _, reply := range v.Replies {
+				r, e := message(reply, c.ID, m.ID)
+				if e != nil {
+					return false, e
+				}
+				if e = s.Store.UpsertMessage(ctx, r); e != nil {
+					return false, e
+				}
+			}
+			if v.RepliesNext != "" {
+				if e := s.Graph.Page(ctx, v.RepliesNext, func(reply json.RawMessage) error {
+					r, e := message(reply, c.ID, m.ID)
+					if e != nil {
+						return e
+					}
+					return s.Store.UpsertMessage(ctx, r)
+				}); e != nil {
+					return false, e
+				}
+			}
+			if v.RepliesNext != "" {
+				return true, nil
+			}
+			return !threadBefore(raw, v.Replies, since), nil
+		})
 	})
 }
 func (s Service) SyncChat(ctx context.Context, c domain.Container) error {
-	return s.Graph.Page(ctx, "me/chats/"+graph.Escape(c.ChatID)+"/messages", func(raw json.RawMessage) error {
-		m, e := message(raw, c.ID, "")
-		if e != nil {
-			return e
-		}
-		return s.Store.UpsertMessage(ctx, m)
+	return s.syncResource(ctx, "chat", c.ID, func(ctx context.Context, since time.Time) error {
+		path := "me/chats/" + graph.Escape(c.ChatID) + "/messages?$top=50&$orderby=lastModifiedDateTime%20desc&$filter=" + url.QueryEscape("lastModifiedDateTime gt "+since.UTC().Format(time.RFC3339))
+		return s.Graph.PageUntil(ctx, path, func(raw json.RawMessage) (bool, error) {
+			m, e := message(raw, c.ID, "")
+			if e != nil {
+				return false, e
+			}
+			return true, s.Store.UpsertMessage(ctx, m)
+		})
 	})
+}
+
+func (s Service) syncResource(ctx context.Context, typ, id string, fn func(context.Context, time.Time) error) error {
+	now := time.Now
+	if s.Now != nil {
+		now = s.Now
+	}
+	started := now().UTC()
+	state, err := s.Store.GetSyncState(ctx, typ, id)
+	if err != nil {
+		return err
+	}
+	lookback := s.InitialLookbackDays
+	if lookback == 0 {
+		lookback = 365
+	}
+	overlap := s.OverlapDuration
+	if overlap == 0 {
+		overlap = 24 * time.Hour
+	}
+	since := started.Add(-time.Duration(lookback) * 24 * time.Hour)
+	if state.LastSuccessAt != nil {
+		since = state.LastSuccessAt.Add(-overlap)
+	}
+	if err = fn(ctx, since); err != nil {
+		_ = s.Store.RecordSyncFailure(ctx, typ, id, started, err)
+		return err
+	}
+	return s.Store.RecordSyncSuccess(ctx, typ, id, started, now().UTC())
+}
+
+func threadBefore(raw json.RawMessage, replies []json.RawMessage, since time.Time) bool {
+	latest := messageModified(raw)
+	for _, reply := range replies {
+		if t := messageModified(reply); t.After(latest) {
+			latest = t
+		}
+	}
+	return !latest.IsZero() && latest.Before(since)
+}
+
+func messageModified(raw json.RawMessage) time.Time {
+	var v struct {
+		Created  string `json:"createdDateTime"`
+		Modified string `json:"lastModifiedDateTime"`
+	}
+	if json.Unmarshal(raw, &v) != nil {
+		return time.Time{}
+	}
+	if v.Modified == "" {
+		v.Modified = v.Created
+	}
+	t, _ := time.Parse(time.RFC3339, v.Modified)
+	return t
 }
 func (s Service) FetchURL(ctx context.Context, rawURL string) (domain.Message, error) {
 	u, err := teamsurl.Parse(rawURL)

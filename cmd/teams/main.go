@@ -90,7 +90,7 @@ func messageCmd(ctx context.Context, db *store.Store, a *auth.Manager, cfg confi
 	raw := args[1]
 	jsonOut := len(args) > 2 && args[2] == "--json"
 	g := graph.New(a, cfg.Sync.RequestTimeout, cfg.Sync.MaxRetries)
-	s := syncservice.Service{Graph: g, Store: db}
+	s := syncservice.Service{Graph: g, Store: db, InitialLookbackDays: cfg.Sync.InitialLookbackDays, OverlapDuration: cfg.Sync.OverlapDuration}
 	m, e := s.FetchURL(ctx, raw)
 	if e != nil {
 		log.Fatal(e)
@@ -116,7 +116,7 @@ func syncCmd(ctx context.Context, db *store.Store, a *auth.Manager, cfg config.C
 	for _, id := range cfg.Chats.ExcludeIDs {
 		excluded[id] = true
 	}
-	s := syncservice.Service{Graph: g, Store: db, ExcludedChats: excluded}
+	s := syncservice.Service{Graph: g, Store: db, ExcludedChats: excluded, InitialLookbackDays: cfg.Sync.InitialLookbackDays, OverlapDuration: cfg.Sync.OverlapDuration}
 	switch args[0] {
 	case "all":
 		for _, t := range cfg.Teams {

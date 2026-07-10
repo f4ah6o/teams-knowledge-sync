@@ -77,6 +77,12 @@ func (c *Client) Do(ctx context.Context, method, path string, body any, out any)
 	return fmt.Errorf("graph retry limit exceeded")
 }
 func (c *Client) Page(ctx context.Context, path string, fn func(json.RawMessage) error) error {
+	return c.PageUntil(ctx, path, func(raw json.RawMessage) (bool, error) {
+		return true, fn(raw)
+	})
+}
+
+func (c *Client) PageUntil(ctx context.Context, path string, fn func(json.RawMessage) (bool, error)) error {
 	for path != "" {
 		var p struct {
 			Value []json.RawMessage `json:"value"`
@@ -89,8 +95,12 @@ func (c *Client) Page(ctx context.Context, path string, fn func(json.RawMessage)
 			return e
 		}
 		for _, v := range p.Value {
-			if e := fn(v); e != nil {
+			cont, e := fn(v)
+			if e != nil {
 				return e
+			}
+			if !cont {
+				return nil
 			}
 		}
 		path = p.Next
