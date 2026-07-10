@@ -168,6 +168,18 @@ func (s Service) FetchURL(ctx context.Context, rawURL string) (domain.Message, e
 	if err = s.Store.UpsertMessage(ctx, m); err != nil {
 		return domain.Message{}, err
 	}
+	if u.Kind == teamsurl.Channel && (u.ParentMessageID == "" || u.ParentMessageID == u.MessageID) {
+		repliesPath := "teams/" + graph.Escape(u.TeamID) + "/channels/" + graph.Escape(u.ChannelID) + "/messages/" + graph.Escape(u.MessageID) + "/replies"
+		if err = s.Graph.Page(ctx, repliesPath, func(replyRaw json.RawMessage) error {
+			reply, parseErr := Message(replyRaw, c.ID, m.ID)
+			if parseErr != nil {
+				return parseErr
+			}
+			return s.Store.UpsertMessage(ctx, reply)
+		}); err != nil {
+			return domain.Message{}, fmt.Errorf("fetch channel thread replies: %w", err)
+		}
+	}
 	return m, nil
 }
 func (s Service) ensureChannel(ctx context.Context, teamID, channelID string) (domain.Container, error) {
