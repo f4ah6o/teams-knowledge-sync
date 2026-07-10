@@ -1,0 +1,95 @@
+package config
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"gopkg.in/yaml.v3"
+)
+
+type Config struct {
+	Database struct {
+		Path string `yaml:"path"`
+	} `yaml:"database"`
+	Entra struct {
+		TenantID string `yaml:"tenant_id"`
+		ClientID string `yaml:"client_id"`
+	} `yaml:"entra"`
+	Sync struct {
+		InitialLookbackDays int           `yaml:"initial_lookback_days"`
+		OverlapDuration     time.Duration `yaml:"overlap_duration"`
+		FullResyncInterval  time.Duration `yaml:"full_resync_interval"`
+		RequestTimeout      time.Duration `yaml:"request_timeout"`
+		MaxRetries          int           `yaml:"max_retries"`
+	} `yaml:"sync"`
+	Notifications struct {
+		ListenAddress string `yaml:"listen_address"`
+		PublicURL     string `yaml:"public_url"`
+	} `yaml:"notifications"`
+	Teams []Team `yaml:"teams"`
+	Chats struct {
+		IncludeMyChats  bool     `yaml:"include_my_chats"`
+		IncludeOneOnOne bool     `yaml:"include_one_on_one"`
+		IncludeGroup    bool     `yaml:"include_group"`
+		IncludeMeeting  bool     `yaml:"include_meeting"`
+		ExcludeIDs      []string `yaml:"exclude_ids"`
+	} `yaml:"chats"`
+}
+type Team struct {
+	ID       string `yaml:"id"`
+	Enabled  bool   `yaml:"enabled"`
+	Channels struct {
+		IncludeAll bool     `yaml:"include_all"`
+		ExcludeIDs []string `yaml:"exclude_ids"`
+	} `yaml:"channels"`
+}
+
+func Load(path string) (Config, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return Config{}, err
+	}
+	b = []byte(os.ExpandEnv(string(b)))
+	var c Config
+	if err := yaml.Unmarshal(b, &c); err != nil {
+		return c, err
+	}
+	if c.Database.Path == "" {
+		c.Database.Path = "./data/teams-knowledge.db"
+	}
+	c.Database.Path = filepath.Clean(c.Database.Path)
+	if c.Sync.InitialLookbackDays == 0 {
+		c.Sync.InitialLookbackDays = 365
+	}
+	if c.Sync.OverlapDuration == 0 {
+		c.Sync.OverlapDuration = 24 * time.Hour
+	}
+	if c.Sync.FullResyncInterval == 0 {
+		c.Sync.FullResyncInterval = 24 * time.Hour
+	}
+	if c.Sync.RequestTimeout == 0 {
+		c.Sync.RequestTimeout = 30 * time.Second
+	}
+	if c.Sync.MaxRetries == 0 {
+		c.Sync.MaxRetries = 5
+	}
+	if c.Notifications.ListenAddress == "" {
+		c.Notifications.ListenAddress = "127.0.0.1:8787"
+	}
+	return c, c.Validate()
+}
+func (c Config) Validate() error {
+	if c.Entra.TenantID == "" || strings.Contains(c.Entra.TenantID, "${") {
+		return fmt.Errorf("entra.tenant_id is required")
+	}
+	if c.Entra.ClientID == "" || strings.Contains(c.Entra.ClientID, "${") {
+		return fmt.Errorf("entra.client_id is required")
+	}
+	if c.Notifications.PublicURL == "" {
+		return fmt.Errorf("notifications.public_url is required")
+	}
+	return nil
+}
