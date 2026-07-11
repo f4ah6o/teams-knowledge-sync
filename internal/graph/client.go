@@ -16,8 +16,11 @@ import (
 
 const base = "https://graph.microsoft.com/v1.0/"
 
+type tokenSource interface {
+	AccessToken(context.Context) (string, error)
+}
 type Client struct {
-	auth    *auth.Manager
+	auth    tokenSource
 	http    *http.Client
 	retries int
 }

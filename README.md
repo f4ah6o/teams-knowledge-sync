@@ -49,4 +49,7 @@ outlook-knowledge mail search "工事引継" --address project-ml@example.com
 outlook-knowledge mail show MESSAGE_ID
 outlook-knowledge mail thread MESSAGE_ID
 outlook-knowledge mail status --json
+outlook-knowledge daemon
 ```
+
+同期はフォルダー単位のdeltaリンクで行われ、全ページ反映後だけdelta状態を確定します。deltaトークン失効時は該当フォルダーのみ完全同期へ戻り、`daemon`は`sync.interval`（既定5分）ごとに全対象フォルダーを再同期し、1フォルダーの失敗が他フォルダーを止めません。

@@ -166,24 +166,86 @@ func (s *Service) SyncAll(ctx context.Context) error {
 	return nil
 }
 
-// SyncFolder pages the folder's messages within the lookback period and
-// stores every message that matches a registered address.
+// SyncFolder runs the folder's delta state machine: resume a stored nextLink,
+// else continue from the stored deltaLink, else start a full delta
+// initialization limited by the lookback period. The deltaLink is committed
+// only after every page has been applied.
 func (s *Service) SyncFolder(ctx context.Context, f domain.MailFolder) error {
-	cutoff := s.lookback().Format(time.RFC3339)
-	pageURL := "me/mailFolders/" + graph.Escape(f.ID) + "/messages?$top=50&$orderby=" + url.QueryEscape("receivedDateTime desc") + "&$filter=" + url.QueryEscape("receivedDateTime ge "+cutoff) + "&$select=" + messageSelect
-	for pageURL != "" {
+	return s.syncFolderDelta(ctx, f, true)
+}
+func (s *Service) syncFolderDelta(ctx context.Context, f domain.MailFolder, allowReset bool) error {
+	started := s.now().UTC()
+	st, err := s.Store.GetMailSyncState(ctx, f.ID)
+	if err != nil {
+		return err
+	}
+	pageURL := st.NextLink
+	if pageURL == "" {
+		pageURL = st.DeltaLink
+	}
+	if pageURL == "" {
+		pageURL = s.deltaInitURL(f)
+	}
+	for {
 		page, err := s.Graph.GetPage(ctx, pageURL, headers())
 		if err != nil {
+			if graph.IsSyncStateInvalid(err) && allowReset {
+				// expired delta token: reinitialize this folder only
+				if e := s.Store.ResetMailSyncState(ctx, f.ID); e != nil {
+					return e
+				}
+				return s.syncFolderDelta(ctx, f, false)
+			}
+			_ = s.Store.RecordMailSyncFailure(ctx, f.ID, started, err)
 			return err
 		}
 		for _, raw := range page.Value {
-			if err := s.storeMatched(ctx, raw, f.ID); err != nil {
+			if err := s.applyDeltaItem(ctx, raw, f.ID); err != nil {
+				_ = s.Store.RecordMailSyncFailure(ctx, f.ID, started, err)
 				return err
 			}
 		}
-		pageURL = page.NextLink
+		if page.NextLink != "" {
+			if err := s.Store.SaveMailNextLink(ctx, f.ID, page.NextLink); err != nil {
+				return err
+			}
+			pageURL = page.NextLink
+			continue
+		}
+		deltaLink := page.DeltaLink
+		if deltaLink == "" {
+			deltaLink = st.DeltaLink
+		}
+		return s.Store.CommitMailDeltaLink(ctx, f.ID, deltaLink, started, s.now().UTC())
 	}
-	return nil
+}
+func (s *Service) deltaInitURL(f domain.MailFolder) string {
+	cutoff := s.lookback().Format(time.RFC3339)
+	return "me/mailFolders/" + graph.Escape(f.ID) + "/messages/delta?$filter=" + url.QueryEscape("receivedDateTime ge "+cutoff) + "&$select=" + messageSelect
+}
+
+// applyDeltaItem reflects one delta entry: @removed tombstones the message in
+// this folder; anything else (adds, updates, read-state changes, moves into
+// this folder) is upserted.
+func (s *Service) applyDeltaItem(ctx context.Context, raw json.RawMessage, folderID string) error {
+	var probe struct {
+		ID      string `json:"id"`
+		Removed *struct {
+			Reason string `json:"reason"`
+		} `json:"@removed"`
+	}
+	if err := json.Unmarshal(raw, &probe); err != nil {
+		return err
+	}
+	if probe.Removed != nil {
+		return s.Store.TombstoneMail(ctx, probe.ID, folderID, s.now().UTC())
+	}
+	return s.storeMatched(ctx, raw, folderID)
+}
+
+// ResetFolder clears the folder's delta state so the next sync reinitializes.
+func (s *Service) ResetFolder(ctx context.Context, folderID string) error {
+	return s.Store.ResetMailSyncState(ctx, folderID)
 }
 
 // storeMatched parses, classifies, and persists one message when it matches a
@@ -194,6 +256,14 @@ func (s *Service) storeMatched(ctx context.Context, raw json.RawMessage, folderI
 		return err
 	}
 	m.Matches = Classify(&m, s.Addresses)
+	if len(m.Matches) == 0 && len(m.Headers) == 0 && s.hasHeaderRules() {
+		// delta payloads may omit internetMessageHeaders; fetch them once
+		// before deciding the message is unmatched
+		if err := s.fetchHeaders(ctx, &m); err != nil {
+			return err
+		}
+		m.Matches = Classify(&m, s.Addresses)
+	}
 	if len(m.Matches) == 0 {
 		return nil
 	}
@@ -205,6 +275,29 @@ func (s *Service) storeMatched(ctx context.Context, raw json.RawMessage, folderI
 		m.Attachments = att
 	}
 	return s.Store.UpsertMailMessage(ctx, m)
+}
+func (s *Service) hasHeaderRules() bool {
+	for _, r := range s.Addresses {
+		if r.Enabled && len(r.Headers) > 0 {
+			return true
+		}
+	}
+	return false
+}
+func (s *Service) fetchHeaders(ctx context.Context, m *domain.MailMessage) error {
+	var v struct {
+		InternetMessageHeaders []struct {
+			Name  string `json:"name"`
+			Value string `json:"value"`
+		} `json:"internetMessageHeaders"`
+	}
+	if err := s.Graph.Do(ctx, http.MethodGet, "me/messages/"+graph.Escape(m.ID)+"?$select=internetMessageHeaders", nil, &v); err != nil {
+		return err
+	}
+	for _, h := range v.InternetMessageHeaders {
+		m.Headers = append(m.Headers, domain.MailHeader{Name: h.Name, Value: h.Value})
+	}
+	return nil
 }
 func (s *Service) fetchAttachments(ctx context.Context, id string) ([]domain.MailAttachment, error) {
 	pageURL := "me/messages/" + graph.Escape(id) + "/attachments?$select=" + url.QueryEscape("id,name,contentType,size,isInline")

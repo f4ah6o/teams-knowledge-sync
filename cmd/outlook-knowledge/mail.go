@@ -85,17 +85,32 @@ func mailSync(ctx context.Context, db *outlookstore.Store, a *auth.Manager, cfg 
 	full := f.Bool("full", false, "reset delta state and resync")
 	_ = f.Parse(args)
 	s := mailService(db, a, cfg)
-	_ = full
 	if *folder != "" {
 		target, err := s.ResolveFolder(ctx, *folder)
 		if err != nil {
 			log.Fatal(err)
+		}
+		if *full {
+			if err := s.ResetFolder(ctx, target.ID); err != nil {
+				log.Fatal(err)
+			}
 		}
 		if err := s.SyncOne(ctx, target); err != nil {
 			log.Fatal(err)
 		}
 		fmt.Printf("synced folder %s\n", target.DisplayName)
 		return
+	}
+	if *full {
+		folders, err := s.ResolveFolders(ctx)
+		if err != nil {
+			log.Fatal(err)
+		}
+		for _, x := range folders {
+			if err := s.ResetFolder(ctx, x.ID); err != nil {
+				log.Fatal(err)
+			}
+		}
 	}
 	if err := s.SyncAll(ctx); err != nil {
 		log.Fatal(err)
@@ -181,10 +196,26 @@ func mailStatus(ctx context.Context, db *outlookstore.Store, args []string) {
 	if e != nil {
 		log.Fatal(e)
 	}
+	states, e := db.ListMailSyncStates(ctx)
+	if e != nil {
+		log.Fatal(e)
+	}
 	if jsonOut {
+		v["sync_states"] = states
 		b, _ := json.MarshalIndent(v, "", "  ")
 		fmt.Println(string(b))
 		return
 	}
 	fmt.Printf("messages: %v\ndeleted: %v\nfolders: %v\naddresses: %v\n", v["messages"], v["deleted_messages"], v["folders"], v["addresses"])
+	for _, st := range states {
+		success := "-"
+		if st.LastSuccessAt != nil {
+			success = st.LastSuccessAt.Format(time.RFC3339)
+		}
+		delta := "no"
+		if st.DeltaLink != "" {
+			delta = "yes"
+		}
+		fmt.Printf("folder %s\tlast_success=%s\tdelta=%s\tfailures=%d\t%s\n", st.FolderID, success, delta, st.ConsecutiveFailures, st.LastError)
+	}
 }

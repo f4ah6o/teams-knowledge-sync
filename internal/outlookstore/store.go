@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS mail_message_addresses (message_row_id INTEGER NOT NU
 CREATE TABLE IF NOT EXISTS mail_headers (message_row_id INTEGER NOT NULL,name TEXT NOT NULL,value TEXT,FOREIGN KEY(message_row_id) REFERENCES mail_messages(row_id));
 CREATE TABLE IF NOT EXISTS mail_attachments (message_row_id INTEGER NOT NULL,id TEXT NOT NULL,name TEXT,content_type TEXT,size INTEGER NOT NULL DEFAULT 0,is_inline INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(message_row_id,id));
 CREATE TABLE IF NOT EXISTS mail_categories (message_row_id INTEGER NOT NULL,category TEXT NOT NULL,FOREIGN KEY(message_row_id) REFERENCES mail_messages(row_id));
+CREATE TABLE IF NOT EXISTS mail_sync_states (folder_id TEXT PRIMARY KEY,next_link TEXT NOT NULL DEFAULT '',delta_link TEXT NOT NULL DEFAULT '',last_attempt_at TEXT NOT NULL DEFAULT '',last_success_at TEXT NOT NULL DEFAULT '',last_full_sync_at TEXT NOT NULL DEFAULT '',last_error TEXT NOT NULL DEFAULT '',consecutive_failures INTEGER NOT NULL DEFAULT 0);
 CREATE VIRTUAL TABLE IF NOT EXISTS mail_fts USING fts5(message_row_id UNINDEXED,content, tokenize='unicode61');
 CREATE INDEX IF NOT EXISTS mail_messages_folder_received ON mail_messages(folder_id,received_at);
 CREATE INDEX IF NOT EXISTS mail_messages_conversation ON mail_messages(conversation_id);

@@ -5,6 +5,7 @@
 ### Added
 
 - Outlook Mailを初回同期してCLI検索できるようになった。(`issues/doing/20260710-add-mail-cli-sync.md`)
+- Outlook Mailがフォルダー単位のdelta同期と削除反映に対応した。(`issues/doing/20260710-add-mail-delta-sync.md`)
 
 ### Changed
 
