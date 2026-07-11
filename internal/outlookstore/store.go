@@ -42,7 +42,15 @@ CREATE TABLE IF NOT EXISTS mail_sync_states (folder_id TEXT PRIMARY KEY,next_lin
 CREATE VIRTUAL TABLE IF NOT EXISTS mail_fts USING fts5(message_row_id UNINDEXED,content, tokenize='unicode61');
 CREATE INDEX IF NOT EXISTS mail_messages_folder_received ON mail_messages(folder_id,received_at);
 CREATE INDEX IF NOT EXISTS mail_messages_conversation ON mail_messages(conversation_id);
-CREATE INDEX IF NOT EXISTS mail_messages_imid ON mail_messages(internet_message_id);`)
+CREATE INDEX IF NOT EXISTS mail_messages_imid ON mail_messages(internet_message_id);
+CREATE TABLE IF NOT EXISTS calendars (id TEXT PRIMARY KEY,name TEXT,owner TEXT,color TEXT,is_default INTEGER NOT NULL DEFAULT 0,can_edit INTEGER NOT NULL DEFAULT 0,can_view_private INTEGER NOT NULL DEFAULT 0,enabled INTEGER NOT NULL DEFAULT 1,raw_json TEXT NOT NULL DEFAULT '',updated_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS calendar_events (row_id INTEGER PRIMARY KEY AUTOINCREMENT,id TEXT NOT NULL,calendar_id TEXT NOT NULL,ical_uid TEXT,series_master_id TEXT,event_type TEXT NOT NULL,subject TEXT,body_html TEXT,body_text TEXT,body_preview TEXT,start_utc TEXT NOT NULL,end_utc TEXT NOT NULL,start_timezone TEXT,end_timezone TEXT,original_start TEXT,is_all_day INTEGER NOT NULL DEFAULT 0,organizer_address TEXT,organizer_name TEXT,location_name TEXT,online_meeting_url TEXT,join_url TEXT,web_url TEXT,show_as TEXT,importance TEXT,sensitivity TEXT,response_status TEXT,is_cancelled INTEGER NOT NULL DEFAULT 0,is_organizer INTEGER NOT NULL DEFAULT 0,is_online_meeting INTEGER NOT NULL DEFAULT 0,has_attachments INTEGER NOT NULL DEFAULT 0,created_at TEXT,modified_at TEXT,deleted_at TEXT,etag TEXT,raw_json TEXT NOT NULL,indexed_at TEXT,UNIQUE(calendar_id,id));
+CREATE TABLE IF NOT EXISTS calendar_attendees (event_row_id INTEGER NOT NULL,attendee_type TEXT NOT NULL,address TEXT,display_name TEXT,response TEXT,FOREIGN KEY(event_row_id) REFERENCES calendar_events(row_id));
+CREATE TABLE IF NOT EXISTS calendar_locations (event_row_id INTEGER NOT NULL,name TEXT NOT NULL,FOREIGN KEY(event_row_id) REFERENCES calendar_events(row_id));
+CREATE TABLE IF NOT EXISTS calendar_categories (event_row_id INTEGER NOT NULL,category TEXT NOT NULL,FOREIGN KEY(event_row_id) REFERENCES calendar_events(row_id));
+CREATE TABLE IF NOT EXISTS calendar_attachments (event_row_id INTEGER NOT NULL,id TEXT NOT NULL,name TEXT,content_type TEXT,size INTEGER NOT NULL DEFAULT 0,is_inline INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(event_row_id,id));
+CREATE VIRTUAL TABLE IF NOT EXISTS calendar_fts USING fts5(event_row_id UNINDEXED,content, tokenize='unicode61');
+CREATE INDEX IF NOT EXISTS calendar_events_time ON calendar_events(calendar_id,start_utc,end_utc);`)
 	return err
 }
 func stamp(t time.Time) string {

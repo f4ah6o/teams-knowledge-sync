@@ -19,6 +19,17 @@ mail:
   folders:
     include: [inbox, sentitems, archive]
     exclude: [deleteditems, junkemail, drafts, outbox]
+calendar:
+  display_timezone: Asia/Tokyo
+  range:
+    past_days: 1095
+    future_days: 365
+  calendars:
+    - id: primary
+      enabled: true
+  private_events:
+    store_details: false
+    expose_to_mcp: false
 sync:
   interval: 5m
   mail_initial_lookback_days: 365

@@ -22,7 +22,7 @@ import (
 var scopes = []string{"offline_access", "User.Read", "Mail.Read", "Calendars.Read"}
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: outlook-knowledge [-config outlook-config.yaml] <auth|mail|daemon> ...")
+	fmt.Fprintln(os.Stderr, "usage: outlook-knowledge [-config outlook-config.yaml] <auth|mail|calendar|daemon> ...")
 }
 func main() {
 	fs := flag.NewFlagSet("outlook-knowledge", flag.ContinueOnError)
@@ -59,6 +59,8 @@ func main() {
 		authCmd(ctx, a, args[1:])
 	case "mail":
 		mailCmd(ctx, db, a, cfg, args[1:])
+	case "calendar":
+		calendarCmd(ctx, db, a, cfg, args[1:])
 	case "daemon":
 		daemonCmd(ctx, db, a, cfg)
 	default:

@@ -28,7 +28,7 @@ teams mcp
 
 ## Outlook Knowledge
 
-同じリポジトリの`outlook-knowledge`バイナリで、Outlookメールをローカル SQLite（`./data/outlook-knowledge.db`）へ同期しCLIで検索できます。
+同じリポジトリの`outlook-knowledge`バイナリで、OutlookメールとOutlook予定表をローカル SQLite（`./data/outlook-knowledge.db`）へ同期しCLIで検索できます。
 
 ### Setup
 
@@ -49,7 +49,16 @@ outlook-knowledge mail search "工事引継" --address project-ml@example.com
 outlook-knowledge mail show MESSAGE_ID
 outlook-knowledge mail thread MESSAGE_ID
 outlook-knowledge mail status --json
+outlook-knowledge calendar list
+outlook-knowledge calendar sync [--calendar CALENDAR_ID] [--from 2026-07-01 --to 2026-07-31] [--full]
+outlook-knowledge calendar day 2026-07-10
+outlook-knowledge calendar range 2026-07-01 2026-07-31
+outlook-knowledge calendar search "定例"
+outlook-knowledge calendar show EVENT_ID
+outlook-knowledge calendar status --json
 outlook-knowledge daemon
 ```
+
+予定はUTCへ正規化して保存し、表示時に`calendar.display_timezone`（既定Asia/Tokyo）へ変換します。終日予定は元タイムゾーンの日付で表示します。非公開予定は`calendar.private_events.store_details: false`（既定）のとき件名・本文・出席者をマスクして保存します。
 
 同期はフォルダー単位のdeltaリンクで行われ、全ページ反映後だけdelta状態を確定します。deltaトークン失効時は該当フォルダーのみ完全同期へ戻り、`daemon`は`sync.interval`（既定5分）ごとに全対象フォルダーを再同期し、1フォルダーの失敗が他フォルダーを止めません。
