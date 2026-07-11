@@ -1,6 +1,6 @@
 # Outlook Mailをフォルダー単位delta同期する
 
-Status: doing
+Status: done
 Model: unknown
 Created: 2026-07-10
 Updated: 2026-07-11

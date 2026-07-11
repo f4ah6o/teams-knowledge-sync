@@ -1,9 +1,9 @@
 # Teams差分同期に最終成功時刻と24時間オーバーラップを導入する
 
-Status: doing
+Status: done
 Model: unknown
 Created: 2026-07-10
-Updated: 2026-07-10
+Updated: 2026-07-11
 Branch: feat/20260710-teams-overlap-sync
 
 ## 概要
@@ -42,13 +42,13 @@ Teamsのチャネル・チャット同期を、コンテナ単位の最終成功
 
 ## 受け入れ条件
 
-- [ ] 状態がないコンテナは `now - initial_lookback_days` から取得する。
-- [ ] 状態があるコンテナは `last_success_at - overlap_duration` から取得する。
-- [ ] 同期成功後、開始時刻が最終成功時刻として保存される。
-- [ ] ページ取得またはUPSERTが失敗した場合、最終成功時刻が更新されない。
-- [ ] 24時間以内に編集されたメッセージと返信が再取得され、UPSERT後に検索結果が更新される。
-- [ ] 削除メッセージは既存のTombstone規則で検索対象から除外される。
-- [ ] `cmd/teams-knowledge/main.go` が `git status` の未追跡・無視対象にならない。
+- [x] 状態がないコンテナは `now - initial_lookback_days` から取得する。
+- [x] 状態があるコンテナは `last_success_at - overlap_duration` から取得する。
+- [x] 同期成功後、開始時刻が最終成功時刻として保存される。
+- [x] ページ取得またはUPSERTが失敗した場合、最終成功時刻が更新されない。
+- [x] 24時間以内に編集されたメッセージと返信が再取得され、UPSERT後に検索結果が更新される。
+- [x] 削除メッセージは既存のTombstone規則で検索対象から除外される。
+- [x] `cmd/teams-knowledge/main.go` が `git status` の未追跡・無視対象にならない。
 
 ## テスト計画
 
@@ -74,3 +74,4 @@ Teamsのチャネル・チャット同期を、コンテナ単位の最終成功
 実装開始前に、初回コミット前の既存ファイルをベースラインとして確定する。
 
 - 2026-07-10: Teamsオーバーラップ差分同期の実装に着手した。既存の`cmd/teams`と`.gitignore`は受け入れ条件を満たしているため変更対象外とした。
+- 2026-07-11: 実装済みの`internal/sync`（`syncResource`のlookback/overlap計算、成功・失敗時の状態記録、Chatの`lastModifiedDateTime gt`フィルター、Channelの更新日時停止判定）を受け入れ条件と照合し、`go build ./...`と`go test ./...`の成功を確認して完了とした。最終条件は`cmd/teams/main.go`がGit管理下にあることで満たしている（`cmd/teams-knowledge/`は存在しない）。
