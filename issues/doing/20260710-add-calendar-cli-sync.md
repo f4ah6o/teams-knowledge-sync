@@ -1,10 +1,10 @@
 # Outlook Calendar CLI初回同期を追加する
 
-Status: polished
+Status: doing
 Model: unknown
 Created: 2026-07-10
-Updated: 2026-07-10
-Branch: feat/20260710-calendar-cli-sync
+Updated: 2026-07-11
+Branch: claude/polished-issues-i4v4uh
 
 ## 概要
 
@@ -40,12 +40,12 @@ Branch: feat/20260710-calendar-cli-sync
 
 ## 受け入れ条件
 
-- [ ] 既定予定表を含む予定表一覧を取得し、同期対象を選択できる。
-- [ ] 指定期間のcalendarViewを複数ページ取得して重複なく保存できる。
-- [ ] 単発、定期発生、例外、終日、キャンセル、Teams会議を識別できる。
-- [ ] UTC、元タイムゾーン、主催者、出席者、場所、会議URL、Outlook URLを保持できる。
-- [ ] 非公開予定を設定に従いマスクまたは保存できる。
-- [ ] 日付・期間・キーワードで保存済み予定を検索できる。
+- [x] 既定予定表を含む予定表一覧を取得し、同期対象を選択できる。
+- [x] 指定期間のcalendarViewを複数ページ取得して重複なく保存できる。
+- [x] 単発、定期発生、例外、終日、キャンセル、Teams会議を識別できる。
+- [x] UTC、元タイムゾーン、主催者、出席者、場所、会議URL、Outlook URLを保持できる。
+- [x] 非公開予定を設定に従いマスクまたは保存できる。
+- [x] 日付・期間・キーワードで保存済み予定を検索できる。
 
 ## テスト計画
 
@@ -69,3 +69,5 @@ Branch: feat/20260710-calendar-cli-sync
 ## 注記
 
 Calendar deltaとウィンドウ管理は次のイシューで実装する。
+
+- 2026-07-11: `internal/calendar`と`internal/outlookstore/calendar.go`、`calendar list/show/sync/day/range/search/status`を実装。`Prefer: outlook.timezone="UTC"`でUTC正規化し元タイムゾーンを保持、終日予定は元タイムゾーンの日付で表示。未取得のseries masterは1回だけ個別取得。非公開予定はraw_jsonごとマスク。実環境での少量取得確認は未実施。
