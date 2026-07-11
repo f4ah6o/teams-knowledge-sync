@@ -50,7 +50,8 @@ CREATE TABLE IF NOT EXISTS calendar_locations (event_row_id INTEGER NOT NULL,nam
 CREATE TABLE IF NOT EXISTS calendar_categories (event_row_id INTEGER NOT NULL,category TEXT NOT NULL,FOREIGN KEY(event_row_id) REFERENCES calendar_events(row_id));
 CREATE TABLE IF NOT EXISTS calendar_attachments (event_row_id INTEGER NOT NULL,id TEXT NOT NULL,name TEXT,content_type TEXT,size INTEGER NOT NULL DEFAULT 0,is_inline INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(event_row_id,id));
 CREATE VIRTUAL TABLE IF NOT EXISTS calendar_fts USING fts5(event_row_id UNINDEXED,content, tokenize='unicode61');
-CREATE INDEX IF NOT EXISTS calendar_events_time ON calendar_events(calendar_id,start_utc,end_utc);`)
+CREATE INDEX IF NOT EXISTS calendar_events_time ON calendar_events(calendar_id,start_utc,end_utc);
+CREATE TABLE IF NOT EXISTS calendar_sync_windows (calendar_id TEXT NOT NULL,window_start_utc TEXT NOT NULL,window_end_utc TEXT NOT NULL,next_link TEXT NOT NULL DEFAULT '',delta_link TEXT NOT NULL DEFAULT '',last_attempt_at TEXT NOT NULL DEFAULT '',last_success_at TEXT NOT NULL DEFAULT '',last_full_sync_at TEXT NOT NULL DEFAULT '',last_error TEXT NOT NULL DEFAULT '',consecutive_failures INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(calendar_id,window_start_utc,window_end_utc));`)
 	return err
 }
 func stamp(t time.Time) string {

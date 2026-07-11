@@ -97,10 +97,14 @@ func authCmd(ctx context.Context, a *auth.Manager, args []string) {
 // Per-folder failures are recorded in mail_sync_states and never abort the
 // loop.
 func daemonCmd(ctx context.Context, db *outlookstore.Store, a *auth.Manager, cfg config.Config) {
-	s := mailService(db, a, cfg)
+	m := mailService(db, a, cfg)
+	c := calendarService(db, a, cfg)
 	run := func() {
-		if err := s.SyncAll(ctx); err != nil {
+		if err := m.SyncAll(ctx); err != nil {
 			log.Printf("mail sync: %v", err)
+		}
+		if err := c.SyncAll(ctx); err != nil {
+			log.Printf("calendar sync: %v", err)
 		}
 	}
 	run()

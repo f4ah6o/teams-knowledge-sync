@@ -73,8 +73,25 @@ func service(g *fakeGraph, db *outlookstore.Store) *Service {
 func viewURL(calID, from, to string) string {
 	return "me/calendars/" + calID + "/calendarView?startDateTime=" + strings.ReplaceAll(from, ":", "%3A") + "&endDateTime=" + strings.ReplaceAll(to, ":", "%3A") + "&$top=50&$select=" + eventSelect
 }
+func deltaURL(calID, from, to string) string {
+	return "me/calendars/" + calID + "/calendarView/delta?startDateTime=" + strings.ReplaceAll(from, ":", "%3A") + "&endDateTime=" + strings.ReplaceAll(to, ":", "%3A")
+}
 
-func TestSyncAllSelectsDefaultCalendarAndPages(t *testing.T) {
+// with Now=2026-07-10 and past/future 30 days, the horizon splits into
+// [Apr1,Jul1), [Jul1,Aug1), [Aug1,Sep1)
+var testWindows = []struct{ from, to string }{
+	{"2026-04-01T00:00:00Z", "2026-07-01T00:00:00Z"},
+	{"2026-07-01T00:00:00Z", "2026-08-01T00:00:00Z"},
+	{"2026-08-01T00:00:00Z", "2026-09-01T00:00:00Z"},
+}
+
+func emptyWindowPages(g *fakeGraph, calID string) {
+	for i, w := range testWindows {
+		g.pages[deltaURL(calID, w.from, w.to)] = graph.PageResult{DeltaLink: fmt.Sprintf("https://graph.microsoft.com/v1.0/delta-%s-%d", calID, i)}
+	}
+}
+
+func TestSyncAllSelectsDefaultCalendarAndPagesWindows(t *testing.T) {
 	db := testStore(t)
 	g := &fakeGraph{
 		pages: map[string]graph.PageResult{
@@ -85,9 +102,10 @@ func TestSyncAllSelectsDefaultCalendarAndPages(t *testing.T) {
 		},
 		objects: map[string]string{},
 	}
-	first := viewURL("cal1", "2026-06-10T12:00:00Z", "2026-08-09T12:00:00Z")
-	g.pages[first] = graph.PageResult{Value: []json.RawMessage{eventJSON("e1", "singleInstance", "one", "2026-07-10T01:00:00", "2026-07-10T02:00:00")}, NextLink: "https://graph.microsoft.com/v1.0/next2"}
-	g.pages["https://graph.microsoft.com/v1.0/next2"] = graph.PageResult{Value: []json.RawMessage{eventJSON("e2", "singleInstance", "two", "2026-07-11T01:00:00", "2026-07-11T02:00:00")}}
+	emptyWindowPages(g, "cal1")
+	// window 2 pages twice before committing its delta link
+	g.pages[deltaURL("cal1", testWindows[1].from, testWindows[1].to)] = graph.PageResult{Value: []json.RawMessage{eventJSON("e1", "singleInstance", "one", "2026-07-10T01:00:00", "2026-07-10T02:00:00")}, NextLink: "https://graph.microsoft.com/v1.0/next2"}
+	g.pages["https://graph.microsoft.com/v1.0/next2"] = graph.PageResult{Value: []json.RawMessage{eventJSON("e2", "singleInstance", "two", "2026-07-11T01:00:00", "2026-07-11T02:00:00")}, DeltaLink: "https://graph.microsoft.com/v1.0/delta-w2"}
 	s := service(g, db)
 	if err := s.SyncAll(context.Background()); err != nil {
 		t.Fatal(err)
@@ -101,13 +119,107 @@ func TestSyncAllSelectsDefaultCalendarAndPages(t *testing.T) {
 			t.Fatalf("disabled calendar synced: %s", r)
 		}
 	}
-	// rerun must not duplicate (UNIQUE(calendar_id,id))
+	states, _ := db.ListCalendarWindowStates(context.Background())
+	if len(states) != 3 {
+		t.Fatalf("states=%+v", states)
+	}
+	for _, st := range states {
+		if st.DeltaLink == "" || st.NextLink != "" || st.LastSuccessAt == nil {
+			t.Fatalf("window state=%+v", st)
+		}
+	}
+	// rerun continues from each window's delta link, no duplicates
+	g.pages["https://graph.microsoft.com/v1.0/delta-cal1-0"] = graph.PageResult{DeltaLink: "https://graph.microsoft.com/v1.0/delta-cal1-0"}
+	g.pages["https://graph.microsoft.com/v1.0/delta-cal1-2"] = graph.PageResult{DeltaLink: "https://graph.microsoft.com/v1.0/delta-cal1-2"}
+	g.pages["https://graph.microsoft.com/v1.0/delta-w2"] = graph.PageResult{Value: []json.RawMessage{eventJSON("e1", "singleInstance", "one", "2026-07-10T01:00:00", "2026-07-10T02:00:00")}, DeltaLink: "https://graph.microsoft.com/v1.0/delta-w2"}
 	if err := s.SyncAll(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	stats, _ = db.CalendarStats(context.Background())
 	if stats["events"] != 2 {
 		t.Fatalf("after rerun stats=%v", stats)
+	}
+}
+
+func TestWindowRemovedInRangeVsOutOfRange(t *testing.T) {
+	db := testStore(t)
+	g := &fakeGraph{objects: map[string]string{}, pages: map[string]graph.PageResult{}}
+	s := service(g, db)
+	julWindow := Window{time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)}
+	// store one event inside the window and one outside it
+	for _, ev := range []json.RawMessage{
+		eventJSON("in", "singleInstance", "in-range", "2026-07-10T01:00:00", "2026-07-10T02:00:00"),
+		eventJSON("out", "singleInstance", "out-of-range", "2026-09-10T01:00:00", "2026-09-10T02:00:00"),
+	} {
+		if err := s.storeEvent(context.Background(), ev, "cal1", map[string]bool{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	g.pages[deltaURL("cal1", "2026-07-01T00:00:00Z", "2026-08-01T00:00:00Z")] = graph.PageResult{Value: []json.RawMessage{
+		json.RawMessage(`{"id":"in","@removed":{"reason":"deleted"}}`),
+		json.RawMessage(`{"id":"out","@removed":{"reason":"deleted"}}`),
+		json.RawMessage(`{"id":"unknown","@removed":{"reason":"deleted"}}`),
+	}, DeltaLink: "https://graph.microsoft.com/v1.0/d1"}
+	if err := s.SyncWindow(context.Background(), "cal1", julWindow); err != nil {
+		t.Fatal(err)
+	}
+	inEv, err := db.GetCalendarEvent(context.Background(), "in")
+	if err != nil || inEv.DeletedAt == nil {
+		t.Fatalf("in-range event not tombstoned: %+v err=%v", inEv, err)
+	}
+	outEv, err := db.GetCalendarEvent(context.Background(), "out")
+	if err != nil || outEv.DeletedAt != nil {
+		t.Fatalf("out-of-range event touched: %+v err=%v", outEv, err)
+	}
+}
+
+func TestWindowSyncStateInvalidResetsWindowOnly(t *testing.T) {
+	db := testStore(t)
+	g := &fakeGraph{objects: map[string]string{}, pages: map[string]graph.PageResult{}, errs: map[string]error{}}
+	s := service(g, db)
+	w := Window{time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)}
+	init := deltaURL("cal1", "2026-07-01T00:00:00Z", "2026-08-01T00:00:00Z")
+	g.pages[init] = graph.PageResult{DeltaLink: "https://graph.microsoft.com/v1.0/d1"}
+	if err := s.SyncWindow(context.Background(), "cal1", w); err != nil {
+		t.Fatal(err)
+	}
+	g.errs["https://graph.microsoft.com/v1.0/d1"] = &graph.Error{Status: 410, Code: "SyncStateNotFound"}
+	g.pages[init] = graph.PageResult{DeltaLink: "https://graph.microsoft.com/v1.0/d2"}
+	if err := s.SyncWindow(context.Background(), "cal1", w); err != nil {
+		t.Fatal(err)
+	}
+	st, _ := db.GetCalendarWindowState(context.Background(), "cal1", w.Start, w.End)
+	if st.DeltaLink != "https://graph.microsoft.com/v1.0/d2" {
+		t.Fatalf("state=%+v", st)
+	}
+}
+
+func TestWindowFailureDoesNotStopOthers(t *testing.T) {
+	db := testStore(t)
+	g := &fakeGraph{objects: map[string]string{}, pages: map[string]graph.PageResult{}, errs: map[string]error{}}
+	s := service(g, db)
+	emptyWindowPages(g, "cal1")
+	failing := deltaURL("cal1", testWindows[0].from, testWindows[0].to)
+	delete(g.pages, failing)
+	g.errs[failing] = &graph.Error{Status: 403, Code: "ErrorAccessDenied"}
+	if err := s.SyncWindows(context.Background(), "cal1"); err != nil {
+		t.Fatal(err)
+	}
+	states, _ := db.ListCalendarWindowStates(context.Background())
+	if len(states) != 3 {
+		t.Fatalf("states=%+v", states)
+	}
+	var failed, ok int
+	for _, st := range states {
+		if st.ConsecutiveFailures > 0 {
+			failed++
+		}
+		if st.DeltaLink != "" {
+			ok++
+		}
+	}
+	if failed != 1 || ok != 2 {
+		t.Fatalf("failed=%d ok=%d states=%+v", failed, ok, states)
 	}
 }
 

@@ -36,7 +36,7 @@ func (s *Store) SaveMailNextLink(ctx context.Context, folderID, nextLink string)
 // CommitMailDeltaLink stores the folder's new delta link after every page of
 // the walk has been applied, clearing the paging checkpoint.
 func (s *Store) CommitMailDeltaLink(ctx context.Context, folderID, deltaLink string, startedAt, completedAt time.Time) error {
-	_, err := s.DB.ExecContext(ctx, `INSERT INTO mail_sync_states(folder_id,next_link,delta_link,last_attempt_at,last_success_at,last_full_sync_at,last_error,consecutive_failures) VALUES(?,'',?,?,?,?, '',0) ON CONFLICT(folder_id) DO UPDATE SET next_link='',delta_link=excluded.delta_link,last_attempt_at=excluded.last_attempt_at,last_success_at=excluded.last_success_at,last_full_sync_at=COALESCE(mail_sync_states.last_full_sync_at,excluded.last_full_sync_at),last_error='',consecutive_failures=0`, folderID, deltaLink, stamp(completedAt), stamp(startedAt), stamp(startedAt))
+	_, err := s.DB.ExecContext(ctx, `INSERT INTO mail_sync_states(folder_id,next_link,delta_link,last_attempt_at,last_success_at,last_full_sync_at,last_error,consecutive_failures) VALUES(?,'',?,?,?,?, '',0) ON CONFLICT(folder_id) DO UPDATE SET next_link='',delta_link=excluded.delta_link,last_attempt_at=excluded.last_attempt_at,last_success_at=excluded.last_success_at,last_full_sync_at=COALESCE(NULLIF(mail_sync_states.last_full_sync_at,''),excluded.last_full_sync_at),last_error='',consecutive_failures=0`, folderID, deltaLink, stamp(completedAt), stamp(startedAt), stamp(startedAt))
 	return err
 }
 func (s *Store) RecordMailSyncFailure(ctx context.Context, folderID string, attemptedAt time.Time, syncErr error) error {

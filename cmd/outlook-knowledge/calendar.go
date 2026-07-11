@@ -28,7 +28,7 @@ func calendarService(db *outlookstore.Store, a *auth.Manager, cfg config.Config)
 	for _, c := range cfg.Calendar.Calendars {
 		sels = append(sels, calendar.Selection{ID: c.ID, Enabled: c.Enabled})
 	}
-	return &calendar.Service{Graph: g, Store: db, Selections: sels, Private: calendar.PrivatePolicy{StoreDetails: cfg.Calendar.PrivateEvents.StoreDetails}, PastDays: cfg.Calendar.Range.PastDays, FutureDays: cfg.Calendar.Range.FutureDays}
+	return &calendar.Service{Graph: g, Store: db, Selections: sels, Private: calendar.PrivatePolicy{StoreDetails: cfg.Calendar.PrivateEvents.StoreDetails}, PastDays: cfg.Calendar.Range.PastDays, FutureDays: cfg.Calendar.Range.FutureDays, RecentMonths: cfg.Calendar.SyncWindows.RecentMonthsPerWindow, HistMonths: cfg.Calendar.SyncWindows.HistoricalMonthsPerWindow, FutureMonths: cfg.Calendar.SyncWindows.FutureMonthsPerWindow}
 }
 func displayLocation(cfg config.Config) *time.Location {
 	loc, err := time.LoadLocation(cfg.Calendar.DisplayTimezone)
@@ -99,7 +99,6 @@ func calendarSync(ctx context.Context, db *outlookstore.Store, a *auth.Manager, 
 	toArg := f.String("to", "", "range end YYYY-MM-DD (inclusive)")
 	full := f.Bool("full", false, "reset state and resync")
 	_ = f.Parse(args)
-	_ = full
 	s := calendarService(db, a, cfg)
 	if *fromArg != "" || *toArg != "" {
 		if *fromArg == "" || *toArg == "" {
@@ -131,12 +130,27 @@ func calendarSync(ctx context.Context, db *outlookstore.Store, a *auth.Manager, 
 		return
 	}
 	if *calID != "" {
-		from, to := s.Range()
-		if err := s.SyncRange(ctx, *calID, from, to); err != nil {
+		if *full {
+			if err := db.ResetCalendarWindows(ctx, *calID); err != nil {
+				log.Fatal(err)
+			}
+		}
+		if err := s.SyncWindows(ctx, *calID); err != nil {
 			log.Fatal(err)
 		}
 		fmt.Println("calendar sync completed")
 		return
+	}
+	if *full {
+		calendars, err := s.SyncCalendars(ctx)
+		if err != nil {
+			log.Fatal(err)
+		}
+		for _, c := range calendars {
+			if err := db.ResetCalendarWindows(ctx, c.ID); err != nil {
+				log.Fatal(err)
+			}
+		}
 	}
 	if err := s.SyncAll(ctx); err != nil {
 		log.Fatal(err)
@@ -229,12 +243,28 @@ func calendarStatus(ctx context.Context, db *outlookstore.Store, args []string) 
 	if err != nil {
 		log.Fatal(err)
 	}
+	windows, err := db.ListCalendarWindowStates(ctx)
+	if err != nil {
+		log.Fatal(err)
+	}
 	if jsonOut {
+		v["sync_windows"] = windows
 		b, _ := json.MarshalIndent(v, "", "  ")
 		fmt.Println(string(b))
 		return
 	}
 	fmt.Printf("calendars: %v\nevents: %v\ncancelled: %v\ndeleted: %v\n", v["calendars"], v["events"], v["cancelled_events"], v["deleted_events"])
+	for _, st := range windows {
+		success := "-"
+		if st.LastSuccessAt != nil {
+			success = st.LastSuccessAt.Format(time.RFC3339)
+		}
+		delta := "no"
+		if st.DeltaLink != "" {
+			delta = "yes"
+		}
+		fmt.Printf("%s\t[%s,%s)\tlast_success=%s\tdelta=%s\tfailures=%d\t%s\n", st.CalendarID, st.WindowStart.Format("2006-01-02"), st.WindowEnd.Format("2006-01-02"), success, delta, st.ConsecutiveFailures, st.LastError)
+	}
 }
 
 // eventWhen renders an event's time in the display timezone. All-day events
