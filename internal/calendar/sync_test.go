@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/obr-grp/teams-knowledge-sync/internal/domain"
 	"github.com/obr-grp/teams-knowledge-sync/internal/graph"
 	"github.com/obr-grp/teams-knowledge-sync/internal/outlookstore"
 )
@@ -64,6 +65,9 @@ func eventJSON(id, typ, subject, start, end string) json.RawMessage {
 }
 
 func service(g *fakeGraph, db *outlookstore.Store) *Service {
+	if err := db.UpsertCalendar(context.Background(), domain.Calendar{ID: "cal1", Name: "primary", IsDefault: true, Enabled: true}); err != nil {
+		panic(err)
+	}
 	return &Service{Graph: g, Store: db,
 		Selections: []Selection{{ID: "primary", Enabled: true}},
 		PastDays:   30, FutureDays: 30,
@@ -73,8 +77,11 @@ func service(g *fakeGraph, db *outlookstore.Store) *Service {
 func viewURL(calID, from, to string) string {
 	return "me/calendars/" + calID + "/calendarView?startDateTime=" + strings.ReplaceAll(from, ":", "%3A") + "&endDateTime=" + strings.ReplaceAll(to, ":", "%3A") + "&$top=50&$select=" + eventSelect
 }
-func deltaURL(calID, from, to string) string {
-	return "me/calendars/" + calID + "/calendarView/delta?startDateTime=" + strings.ReplaceAll(from, ":", "%3A") + "&endDateTime=" + strings.ReplaceAll(to, ":", "%3A")
+func deltaURL(_ string, from, to string) string {
+	return "me/calendarView/delta?startDateTime=" + strings.ReplaceAll(from, ":", "%3A") + "&endDateTime=" + strings.ReplaceAll(to, ":", "%3A")
+}
+func betaDeltaURL(calID, from, to string) string {
+	return "https://graph.microsoft.com/beta/me/calendars/" + calID + "/calendarView/delta?startDateTime=" + strings.ReplaceAll(from, ":", "%3A") + "&endDateTime=" + strings.ReplaceAll(to, ":", "%3A")
 }
 
 // with Now=2026-07-10 and past/future 30 days, the horizon splits into
@@ -220,6 +227,23 @@ func TestWindowFailureDoesNotStopOthers(t *testing.T) {
 	}
 	if failed != 1 || ok != 2 {
 		t.Fatalf("failed=%d ok=%d states=%+v", failed, ok, states)
+	}
+}
+
+func TestSyncWindowUsesBetaForNonDefaultCalendar(t *testing.T) {
+	db := testStore(t)
+	if err := db.UpsertCalendar(context.Background(), domain.Calendar{ID: "cal2", Name: "other", Enabled: true}); err != nil {
+		t.Fatal(err)
+	}
+	g := &fakeGraph{objects: map[string]string{}, pages: map[string]graph.PageResult{}}
+	w := Window{time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)}
+	g.pages[betaDeltaURL("cal2", "2026-07-01T00:00:00Z", "2026-08-01T00:00:00Z")] = graph.PageResult{DeltaLink: "https://graph.microsoft.com/beta/delta-cal2"}
+	s := service(g, db)
+	if err := s.SyncWindow(context.Background(), "cal2", w); err != nil {
+		t.Fatal(err)
+	}
+	if len(g.requests) != 1 || !strings.HasPrefix(g.requests[0], "https://graph.microsoft.com/beta/me/calendars/cal2/calendarView/delta?") {
+		t.Fatalf("requests=%v", g.requests)
 	}
 }
 

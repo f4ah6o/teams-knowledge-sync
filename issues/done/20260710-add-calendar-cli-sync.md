@@ -1,9 +1,9 @@
 # Outlook Calendar CLI初回同期を追加する
 
-Status: doing
-Model: unknown
+Status: done
+Model: GPT-5
 Created: 2026-07-10
-Updated: 2026-07-11
+Updated: 2026-07-15
 Branch: claude/polished-issues-i4v4uh
 
 ## 概要
@@ -71,3 +71,4 @@ Branch: claude/polished-issues-i4v4uh
 Calendar deltaとウィンドウ管理は次のイシューで実装する。
 
 - 2026-07-11: `internal/calendar`と`internal/outlookstore/calendar.go`、`calendar list/show/sync/day/range/search/status`を実装。`Prefer: outlook.timezone="UTC"`でUTC正規化し元タイムゾーンを保持、終日予定は元タイムゾーンの日付で表示。未取得のseries masterは1回だけ個別取得。非公開予定はraw_jsonごとマスク。実環境での少量取得確認は未実施。
+- 2026-07-15: origin/mainで実装と自動テストを確認し、実装済みとして完了へ移行する。

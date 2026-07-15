@@ -1,9 +1,9 @@
 # Outlook Mail CLI初回同期を追加する
 
-Status: doing
-Model: unknown
+Status: done
+Model: GPT-5
 Created: 2026-07-10
-Updated: 2026-07-11
+Updated: 2026-07-15
 Branch: claude/polished-issues-i4v4uh
 
 ## 概要
@@ -71,3 +71,4 @@ Graphの受信者情報にメーリングリスト原アドレスが残らない
 deltaリンクと定期Daemonは次のイシューで実装する。
 
 - 2026-07-11: `cmd/outlook-knowledge`、`internal/{outlookstore,mail}`、`internal/domain/mail.go`を追加。auth/config/graphを共有化（スコープ・キャッシュのパラメータ化、`LoadOutlook`、`GetPage`）。`go test ./...`成功。実環境での認証・少量フォルダー取得・Outlook URL確認は未実施。
+- 2026-07-15: origin/mainで実装と自動テストを確認し、実装済みとして完了へ移行する。
