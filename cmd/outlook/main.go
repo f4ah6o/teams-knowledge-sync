@@ -22,10 +22,10 @@ import (
 var scopes = []string{"offline_access", "User.Read", "Mail.Read", "Calendars.Read"}
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: outlook-knowledge [-config outlook-config.yaml] <auth|mail|calendar|daemon> ...")
+	fmt.Fprintln(os.Stderr, "usage: outlook [-config outlook-config.yaml] <auth|mail|calendar|daemon> ...")
 }
 func main() {
-	fs := flag.NewFlagSet("outlook-knowledge", flag.ContinueOnError)
+	fs := flag.NewFlagSet("outlook", flag.ContinueOnError)
 	cfgPath := fs.String("config", "outlook-config.yaml", "config path")
 	_ = fs.Parse(os.Args[1:])
 	if *cfgPath == "outlook-config.yaml" {

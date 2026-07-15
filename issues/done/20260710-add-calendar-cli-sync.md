@@ -8,7 +8,7 @@ Branch: claude/polished-issues-i4v4uh
 
 ## 概要
 
-`outlook-knowledge` にCalendar機能を追加し、選択した予定表の指定期間を初回取得してSQLiteから検索・表示できるようにする。
+`outlook` にCalendar機能を追加し、選択した予定表の指定期間を初回取得してSQLiteから検索・表示できるようにする。
 
 ## 背景
 
@@ -31,7 +31,7 @@ Branch: claude/polished-issues-i4v4uh
 
 ## 提案する方針
 
-- Mailと同じ `outlook-knowledge` バイナリ、認証、Graphクライアント、SQLiteを共有する。
+- Mailと同じ `outlook` バイナリ、認証、Graphクライアント、SQLiteを共有する。
 - `calendar.calendars`、`calendar.range`、`display_timezone`、非公開予定の保存・公開設定を追加する。
 - 予定表一覧を取得し、指定した `[from,to)` のcalendarViewをページングする。
 - `calendars`、`calendar_events`、attendees、locations、categories、attachments、FTSを追加する。
@@ -72,3 +72,4 @@ Calendar deltaとウィンドウ管理は次のイシューで実装する。
 
 - 2026-07-11: `internal/calendar`と`internal/outlookstore/calendar.go`、`calendar list/show/sync/day/range/search/status`を実装。`Prefer: outlook.timezone="UTC"`でUTC正規化し元タイムゾーンを保持、終日予定は元タイムゾーンの日付で表示。未取得のseries masterは1回だけ個別取得。非公開予定はraw_jsonごとマスク。実環境での少量取得確認は未実施。
 - 2026-07-15: origin/mainで実装と自動テストを確認し、実装済みとして完了へ移行する。
+- 2026-07-15: CLI名を `outlook` に統一した。

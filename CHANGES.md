@@ -11,6 +11,7 @@
 
 ### Changed
 
+- Outlook CLIのコマンド名を `outlook-knowledge` から `outlook` に変更した。
 - Teamsのチャネル・チャット同期が、コンテナ単位の最終成功時刻と24時間のオーバーラップを利用するようになった。(`issues/done/20260710-add-teams-overlap-sync.md`)
 
 ### Fixed
@@ -22,3 +23,5 @@
 ### Security
 
 ### Migration
+
+- `outlook-knowledge` を実行しているスクリプトや手順は `outlook` に置き換える。既存の `outlook-knowledge.db` と認証キャッシュは継続利用できる。

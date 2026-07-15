@@ -8,7 +8,7 @@ Branch: claude/polished-issues-i4v4uh
 
 ## 概要
 
-同一リポジトリに `outlook-knowledge` のMail機能を追加し、登録アドレスに関係するメールを初回取得してSQLite検索できるようにする。
+同一リポジトリに `outlook` のMail機能を追加し、登録アドレスに関係するメールを初回取得してSQLite検索できるようにする。
 
 ## 背景
 
@@ -31,7 +31,7 @@ Branch: claude/polished-issues-i4v4uh
 
 ## 提案する方針
 
-- `cmd/outlook-knowledge` を追加し、既存のDevice Code FlowとGraphクライアントを共有する。
+- `cmd/outlook` を追加し、既存のDevice Code FlowとGraphクライアントを共有する。
 - `mail.addresses`、`mail.folders`、`mail.include_received`、`mail.include_sent` と `mail_initial_lookback_days` を設定化する。
 - フォルダー一覧を取得し、対象フォルダーごとに期間制限付きメッセージ一覧をページングする。
 - アドレスは空白・表示名・`mailto:`・山括弧を正規化し、受信者、送信者、指定ヘッダー、設定済み件名ルールを優先順位どおり判定する。
@@ -70,5 +70,6 @@ Graphの受信者情報にメーリングリスト原アドレスが残らない
 
 deltaリンクと定期Daemonは次のイシューで実装する。
 
-- 2026-07-11: `cmd/outlook-knowledge`、`internal/{outlookstore,mail}`、`internal/domain/mail.go`を追加。auth/config/graphを共有化（スコープ・キャッシュのパラメータ化、`LoadOutlook`、`GetPage`）。`go test ./...`成功。実環境での認証・少量フォルダー取得・Outlook URL確認は未実施。
+- 2026-07-11: `cmd/outlook`、`internal/{outlookstore,mail}`、`internal/domain/mail.go`を追加。auth/config/graphを共有化（スコープ・キャッシュのパラメータ化、`LoadOutlook`、`GetPage`）。`go test ./...`成功。実環境での認証・少量フォルダー取得・Outlook URL確認は未実施。
 - 2026-07-15: origin/mainで実装と自動テストを確認し、実装済みとして完了へ移行する。
+- 2026-07-15: CLI名を `outlook` に統一した。

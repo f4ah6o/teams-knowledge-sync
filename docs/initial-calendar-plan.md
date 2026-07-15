@@ -272,27 +272,27 @@ calendar:
 ### 9.1 CLI
 
 ```text
-outlook-knowledge calendar auth login
-outlook-knowledge calendar auth status
+outlook calendar auth login
+outlook calendar auth status
 
-outlook-knowledge calendar list
-outlook-knowledge calendar show CALENDAR_ID
+outlook calendar list
+outlook calendar show CALENDAR_ID
 
-outlook-knowledge calendar sync
-outlook-knowledge calendar sync --calendar CALENDAR_ID
-outlook-knowledge calendar sync --from 2026-01-01 --to 2026-12-31
-outlook-knowledge calendar sync --full
+outlook calendar sync
+outlook calendar sync --calendar CALENDAR_ID
+outlook calendar sync --from 2026-01-01 --to 2026-12-31
+outlook calendar sync --full
 
-outlook-knowledge calendar search "工事改善"
-outlook-knowledge calendar day 2026-07-10
-outlook-knowledge calendar range 2026-07-01 2026-07-31
-outlook-knowledge calendar status
+outlook calendar search "工事改善"
+outlook calendar day 2026-07-10
+outlook calendar range 2026-07-01 2026-07-31
+outlook calendar status
 ```
 
 ### 9.2 Daemon
 
 ```text
-outlook-knowledge calendar daemon
+outlook calendar daemon
 ```
 
 実行内容:
@@ -309,7 +309,7 @@ outlook-knowledge calendar daemon
 ### 9.3 MCP
 
 ```text
-outlook-knowledge calendar mcp
+outlook calendar mcp
 ```
 
 初期バージョンではstdio transportを使用する。
@@ -854,19 +854,19 @@ logging:
 ## 18. CLI仕様
 
 ```text
-outlook-knowledge calendar list
-outlook-knowledge calendar show CALENDAR_ID
+outlook calendar list
+outlook calendar show CALENDAR_ID
 
-outlook-knowledge calendar sync
-outlook-knowledge calendar sync --calendar CALENDAR_ID
-outlook-knowledge calendar sync --from 2026-01-01 --to 2026-12-31
-outlook-knowledge calendar sync --full
+outlook calendar sync
+outlook calendar sync --calendar CALENDAR_ID
+outlook calendar sync --from 2026-01-01 --to 2026-12-31
+outlook calendar sync --full
 
-outlook-knowledge calendar day 2026-07-10
-outlook-knowledge calendar range 2026-07-01 2026-07-31
-outlook-knowledge calendar search "工事改善"
-outlook-knowledge calendar show-event EVENT_ID
-outlook-knowledge calendar status
+outlook calendar day 2026-07-10
+outlook calendar range 2026-07-01 2026-07-31
+outlook calendar search "工事改善"
+outlook calendar show-event EVENT_ID
+outlook calendar status
 ```
 
 ---
