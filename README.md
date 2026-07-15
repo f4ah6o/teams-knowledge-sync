@@ -63,4 +63,6 @@ outlook-knowledge daemon
 
 予定表の同期は半開区間`[start,end)`の同期ウィンドウ単位でcalendarView deltaを実行します（既定: 過去3か月、直近未来1か月、遠い未来3か月の分割）。ウィンドウごとにdelta状態を独立管理し、token失効時は該当ウィンドウのみ完全同期へ戻ります。未来の同期範囲が`calendar.range.future_days`を下回ると新しいウィンドウが自動追加され、`daemon`はメールと予定表を続けて再同期します。
 
+Microsoft Graph v1.0のcalendarView deltaは既定予定表では`/me/calendarView/delta`を使い、明示選択した非既定予定表ではbetaの`/me/calendars/{id}/calendarView/delta`を使います。beta APIは仕様変更の可能性があるため、実運用ではMicrosoft Graphの現行仕様を確認してください。
+
 同期はフォルダー単位のdeltaリンクで行われ、全ページ反映後だけdelta状態を確定します。deltaトークン失効時は該当フォルダーのみ完全同期へ戻り、`daemon`は`sync.interval`（既定5分）ごとに全対象フォルダーを再同期し、1フォルダーの失敗が他フォルダーを止めません。

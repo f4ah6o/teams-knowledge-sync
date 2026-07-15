@@ -2,11 +2,14 @@ package calendar
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/obr-grp/teams-knowledge-sync/internal/domain"
@@ -194,7 +197,10 @@ func (s *Service) syncWindowDelta(ctx context.Context, calendarID string, w Wind
 		pageURL = st.DeltaLink
 	}
 	if pageURL == "" {
-		pageURL = "me/calendars/" + graph.Escape(calendarID) + "/calendarView/delta?startDateTime=" + url.QueryEscape(w.Start.Format(time.RFC3339)) + "&endDateTime=" + url.QueryEscape(w.End.Format(time.RFC3339))
+		pageURL, err = s.calendarDeltaURL(ctx, calendarID, w)
+		if err != nil {
+			return err
+		}
 	}
 	fetchedMasters := map[string]bool{}
 	for {
@@ -229,6 +235,25 @@ func (s *Service) syncWindowDelta(ctx context.Context, calendarID string, w Wind
 		}
 		return s.Store.CommitCalendarWindowDeltaLink(ctx, calendarID, w.Start, w.End, deltaLink, started, s.now().UTC())
 	}
+}
+
+// calendarDeltaURL returns the versioned endpoint for a calendarView delta.
+// Microsoft Graph v1.0 exposes this operation for the user's default
+// calendar; other user calendars use the beta endpoint. Stored nextLink and
+// deltaLink values bypass this function and remain opaque.
+func (s *Service) calendarDeltaURL(ctx context.Context, calendarID string, w Window) (string, error) {
+	query := "?startDateTime=" + url.QueryEscape(w.Start.Format(time.RFC3339)) + "&endDateTime=" + url.QueryEscape(w.End.Format(time.RFC3339))
+	if strings.EqualFold(calendarID, "primary") {
+		return "me/calendarView/delta" + query, nil
+	}
+	c, err := s.Store.GetCalendar(ctx, calendarID)
+	if err == nil && c.IsDefault {
+		return "me/calendarView/delta" + query, nil
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return "", err
+	}
+	return "https://graph.microsoft.com/beta/me/calendars/" + graph.Escape(calendarID) + "/calendarView/delta" + query, nil
 }
 
 // applyDeltaItem reflects one delta entry. Removal notices can reference
