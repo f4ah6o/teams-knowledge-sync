@@ -20,24 +20,25 @@ import (
 	"github.com/zalando/go-keyring"
 )
 
-const service = "teams-knowledge-sync"
-
 type Token struct {
 	AccessToken  string    `json:"access_token"`
 	RefreshToken string    `json:"refresh_token"`
 	ExpiresAt    time.Time `json:"expires_at"`
 }
 type Manager struct {
-	tenant, client, cachePath string
-	http                      *http.Client
+	tenant, client, cachePath, service, scope string
+	http                                      *http.Client
 }
 
 func New(tenant, client string) *Manager {
+	return NewFor(tenant, client, "teams-knowledge-sync", []string{"offline_access", "User.Read", "Team.ReadBasic.All", "Channel.ReadBasic.All", "ChannelMessage.Read.All", "Chat.Read"})
+}
+func NewFor(tenant, client, app string, scopes []string) *Manager {
 	base, err := os.UserConfigDir()
 	if err != nil {
 		base = "."
 	}
-	return &Manager{tenant: tenant, client: client, cachePath: filepath.Join(base, "teams-knowledge-sync", "token.cache"), http: &http.Client{Timeout: 30 * time.Second}}
+	return &Manager{tenant: tenant, client: client, cachePath: filepath.Join(base, app, "token.cache"), service: app, scope: strings.Join(scopes, " "), http: &http.Client{Timeout: 30 * time.Second}}
 }
 func (m *Manager) tokenURL() string {
 	return "https://login.microsoftonline.com/" + url.PathEscape(m.tenant) + "/oauth2/v2.0/token"
@@ -78,14 +79,14 @@ func (m *Manager) Save(t Token) error {
 	return os.WriteFile(m.cachePath, blob, 0600)
 }
 func (m *Manager) Logout() error {
-	_ = keyring.Delete(service, "cache-key:"+m.client)
+	_ = keyring.Delete(m.service, "cache-key:"+m.client)
 	if e := os.Remove(m.cachePath); e != nil && !os.IsNotExist(e) {
 		return e
 	}
 	return nil
 }
 func (m *Manager) key() ([]byte, error) {
-	v, e := keyring.Get(service, "cache-key:"+m.client)
+	v, e := keyring.Get(m.service, "cache-key:"+m.client)
 	if e == nil {
 		return base64.StdEncoding.DecodeString(v)
 	}
@@ -96,7 +97,7 @@ func (m *Manager) key() ([]byte, error) {
 	if _, e = rand.Read(b); e != nil {
 		return nil, e
 	}
-	if e = keyring.Set(service, "cache-key:"+m.client, base64.StdEncoding.EncodeToString(b)); e != nil {
+	if e = keyring.Set(m.service, "cache-key:"+m.client, base64.StdEncoding.EncodeToString(b)); e != nil {
 		return nil, fmt.Errorf("save encryption key in OS credential store: %w", e)
 	}
 	return b, nil
@@ -141,7 +142,7 @@ func (m *Manager) AccessToken(ctx context.Context) (string, error) {
 	if t.RefreshToken == "" {
 		return "", fmt.Errorf("reauthentication required")
 	}
-	n, e := m.exchange(ctx, url.Values{"client_id": {m.client}, "grant_type": {"refresh_token"}, "refresh_token": {t.RefreshToken}, "scope": {"offline_access User.Read Team.ReadBasic.All Channel.ReadBasic.All ChannelMessage.Read.All Chat.Read"}})
+	n, e := m.exchange(ctx, url.Values{"client_id": {m.client}, "grant_type": {"refresh_token"}, "refresh_token": {t.RefreshToken}, "scope": {m.scope}})
 	if e != nil {
 		return "", e
 	}
@@ -154,7 +155,7 @@ func (m *Manager) AccessToken(ctx context.Context) (string, error) {
 	return n.AccessToken, nil
 }
 func (m *Manager) Login(ctx context.Context, notify func(string)) error {
-	form := url.Values{"client_id": {m.client}, "scope": {"offline_access User.Read Team.ReadBasic.All Channel.ReadBasic.All ChannelMessage.Read.All Chat.Read"}}
+	form := url.Values{"client_id": {m.client}, "scope": {m.scope}}
 	req, e := http.NewRequestWithContext(ctx, http.MethodPost, "https://login.microsoftonline.com/"+url.PathEscape(m.tenant)+"/oauth2/v2.0/devicecode", strings.NewReader(form.Encode()))
 	if e != nil {
 		return e
